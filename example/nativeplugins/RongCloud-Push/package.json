@@ -1,0 +1,51 @@
+{
+	"name": "RCUniPush",
+	"id": "RongCloud-Push",
+	"version": "5.2.2",
+	"description": "融云原生端推送插件，服务于 RCUniIM",
+	"_dp_type": "nativeplugin",
+	"_dp_nativeplugin": {
+		"android": {
+			"hooksClass": "cn.rongcloud.push.uni.RCUniPushAppHookProxy",
+			"plugins": [{
+				"type": "module",
+				"name": "RongCloud-Push-RCUniPush",
+				"class": "cn.rongcloud.push.uni.RCUniPushModule"
+			}],
+			"integrateType": "aar",
+			"compileOptions": {
+				"sourceCompatibility": "1.8",
+				"targetCompatibility": "1.8"
+			},
+			"minSdkVersion": 21,
+			"useAndroidX": true,
+			"dependencies": [
+				"commons-codec:commons-codec:1.6"
+			],
+			"parameters": {
+				"com.huawei.hms.client.appid": {
+					"des": "华为推送 appid",
+					"key": "com.huawei.hms.client.appid"
+				},
+				"com.vivo.push.app_id": {
+					"des": "VIVO推送 app_id",
+					"key": "com.vivo.push.app_id"
+				},
+				"com.vivo.push.api_key": {
+					"des": "VIVO推送 api_key",
+					"key": "com.vivo.push.api_key"
+				}
+			}
+		},
+		"ios": {
+			"hooksClass": "RCUniPushHookProxy",
+			"plugins": [{
+				"type": "module",
+				"name": "RongCloud-Push-RCUniPush",
+				"class": "RCUniPush"
+			}],
+			"integrateType": "framework",
+			"deploymentTarget": "9.0"
+		}
+	}
+}
