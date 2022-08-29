@@ -42,7 +42,8 @@
                     "<uses-permission android:name=\"android.permission.VIBRATE\"/>",
                     "<uses-permission android:name=\"android.permission.WAKE_LOCK\"/>",
                     "<uses-permission android:name=\"android.permission.WRITE_SETTINGS\"/>"
-                ]
+                ],
+                "minSdkVersion" : 21
             },
             /* ios打包配置 */
             "ios" : {},
@@ -53,20 +54,6 @@
             }
         },
         "nativePlugins" : {
-            "RongCloud-IM-V2" : {
-                "__plugin_info__" : {
-                    "name" : "RCUniIMV2",
-                    "description" : "融云 uni 原生插件",
-                    "platforms" : "Android,iOS",
-                    "url" : "",
-                    "android_package_name" : "",
-                    "ios_bundle_id" : "",
-                    "isCloud" : false,
-                    "bought" : -1,
-                    "pid" : "",
-                    "parameters" : {}
-                }
-            },
             "RongCloud-Push" : {
                 "com.huawei.hms.client.appid" : "106899153",
                 "com.vivo.push.app_id" : "105583872",
@@ -98,6 +85,20 @@
                             "value" : ""
                         }
                     }
+                }
+            },
+            "RongCloud-IM-V2" : {
+                "__plugin_info__" : {
+                    "name" : "RCUniIMV2",
+                    "description" : "融云 uni 原生插件",
+                    "platforms" : "Android,iOS",
+                    "url" : "",
+                    "android_package_name" : "",
+                    "ios_bundle_id" : "",
+                    "isCloud" : false,
+                    "bought" : -1,
+                    "pid" : "",
+                    "parameters" : {}
                 }
             }
         }
