@@ -1,14 +1,10 @@
 {
     "name": "RCUniIMV2",
-    "__attrs__": {
-        "globals": "RCIMEngine"
-    },
     "version": "1.0.0",
     "description": "",
     "main": "",
     "scripts": {
-        "doc": "npx typedoc src/*.ts",
-        "release": "tsc"
+        
     },
     "repository": {
         "type": "git",

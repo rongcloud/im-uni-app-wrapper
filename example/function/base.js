@@ -3,6 +3,7 @@ import RCIMIWEngine from "@/uni_modules/RongCloud-IMWrapper-V2/js_sdk/RCIMEngine
 import { addSuccessResult, addErrorResult, addWarnResult, addPrimaryResult } from '../util/common.js'
 import initListener from './listener.js'
 import helper from '../common/helper.js'
+import config from "../config/config.js"
 
 export const _initListener = {
 	name: "\xa0\xa0设置监听\xa0\xa0",
@@ -67,8 +68,11 @@ export const _init = {
 				locationThumbnailQuality: parseInt(locationThumbnailQuality),
 				locationThumbnailWidth: parseInt(locationThumbnailWidth),
 				locationThumbnailHeight: parseInt(locationThumbnailHeight),
-			}
+			},
+			// 非必填，推送使用
+			pushOptions:config.pushOptions
 		}
+		console.log('options---',options)
 		RCIMIWEngine.create(appKey,options).then((res) => {
 				console.log('初始化引擎res---', res)
 				helper.RCIMIWEngineInstance = res;
