@@ -67,17 +67,6 @@ export const _init = {
 				locationThumbnailQuality: parseInt(locationThumbnailQuality),
 				locationThumbnailWidth: parseInt(locationThumbnailWidth),
 				locationThumbnailHeight: parseInt(locationThumbnailHeight),
-			},
-			// 非必填，推送使用
-			pushOptions:{
-				idMI: '2882303761520161083',
-				appKeyMI: '5612016127083',
-				appIdMeizu: '148467',
-				appKeyMeizu: '7fb9ae0e05924e83a15b0d94f37c9c14',
-				appKeyOPPO: '5a291007ce174565975deb8cf2fbedc8',
-				appSecretOPPO: 'e8c19048286f472c8cc99f12dd886ba1',
-				enableHWPush: true,
-				enableVIVOPush: true
 			}
 		}
 		RCIMIWEngine.create(appKey,options).then((res) => {

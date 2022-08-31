@@ -1,11 +1,11 @@
 {
-    "name": "@rongcloud/imwrapper-uni",
+    "name": "RCUniIMV2",
     "__attrs__": {
         "globals": "RCIMEngine"
     },
     "version": "1.0.0",
     "description": "",
-    "main": "./dist/index.js",
+    "main": "",
     "scripts": {
         "doc": "npx typedoc src/*.ts",
         "release": "tsc"
@@ -14,11 +14,7 @@
         "type": "git",
         "url": ""
     },
-    "keywords": [
-        "rtc",
-        "uni",
-        "rongcloud"
-    ],
+    "keywords": [],
     "author": "",
     "license": "ISC",
     "files": [
