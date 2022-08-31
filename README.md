@@ -1,6 +1,7 @@
 本教程是为了让新手快速了解融云即时通讯能力库（IMLib）。在本教程中，您可以体验集成 SDK 的基本流程和 IMLib 的基础通信能力。
-[融云 uni-app IM 官方文档](https://doc.rongcloud.cn/im/uni-app/5.X/prepare)
-[融云 uni-app RCUniIMV 插件](https://ext.dcloud.net.cn/plugin?id=9227)
+- [融云 uni-app IM 官方文档](https://doc.rongcloud.cn/im/uni-app/5.X/prepare)
+
+- [融云 uni-app RCUniIMV2 插件](https://ext.dcloud.net.cn/plugin?id=9227)
 
 #### 融云开发者账户
 
@@ -18,7 +19,7 @@
 
 #### 安装插件 {#import}
 
-1. 在[ DCloud 插件市场 ](https://ext.dcloud.net.cn/search?q=RCUniIMV2)搜索并安装本原生插件，或者手动下载安装插件放入 `nativeplugins` 目录下。
+1. 在[ DCloud 插件市场 ](https://ext.dcloud.net.cn/search?q=RCUniIMV2)搜索并安装原生插件[ RCUniIMV2 ](https://ext.dcloud.net.cn/plugin?id=9227)，或者手动下载安装插件放入 `nativeplugins` 目录下。
 
 2. 在 manifest.json -> APP 原生插件配置 -> 加入原生插件 `RCUniIMV2`。
 
