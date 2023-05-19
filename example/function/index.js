@@ -1,30 +1,30 @@
- import { _init,
+import { _init,
 	_connect, 
 	_disconnect, 
-	_initListener,
+	_addListener,
 	_destroy
- } from "./base.js"
+ } from "../interface/connect/connect.js"
  
 import { 
-	_loadConversations,
-	_loadConversation,
+	_getConversations,
+	_getConversation,
 	_removeConversation,
 	_removeConversations,
 	_saveDraftMessage,
-	_loadDraftMessage,
+	_getDraftMessage,
 	_clearDraftMessage,
 	_changeConversationNotificationLevel,
-	_loadConversationNotificationLevel,
+	_getConversationNotificationLevel,
 	_changeConversationTypeNotificationLevel,
-	_loadConversationTypeNotificationLevel,
-	_loadBlockedConversations,
+	_getConversationTypeNotificationLevel,
+	_getBlockedConversations,
 	_changeConversationTopStatus,
-	_setOnConversationTopStatusLoadedListener,
+	_getConversationTopStatus,
 	_syncConversationReadStatus,
 	_searchConversations,
-	_loadMessageCount,
-	_loadTopConversations,
- } from './conversation.js'
+	_getMessageCount,
+	_getTopConversations,
+ } from '../interface/conversation/conversation.js'
  
 import {
 	_sendTextMessage,
@@ -40,7 +40,7 @@ import {
 	_downloadMediaMessage,
 	_cancelDownloadMediaMessage,
 	_sendTypingStatus,
-	_loadMessages,
+	_getMessages,
 	_getMessageById,
 	_getMessageByUId,
 	_getFirstUnreadMessage,
@@ -62,64 +62,65 @@ import {
 	_searchMessagesByTimeRange,
 	_searchMessagesByUserId,
 	_sendGroupMessageToDesignatedUsers,
-} from './message.js'
+} from '../interface/message/message.js'
 
 import {
-	_loadUnreadCount,
-	_loadTotalUnreadCount, 
-	_loadUnreadCountByConversationTypes, 
-	_loadUnreadMentionedCount, 
+	_getUnreadCount,
+	_getTotalUnreadCount, 
+	_getUnreadCountByConversationTypes, 
+	_getUnreadMentionedCount, 
 	_clearUnreadCount,
- } from "./unread.js"
+ } from "../interface/unread/unread.js"
  
 import {
 	_joinChatRoom,
 	_leaveChatRoom,
-	_loadChatRoomMessages,
-	_loadChatRoomEntry,
-	_loadAllChatRoomEntries,
+	_getChatRoomMessages,
+	_getChatRoomEntry,
+	_getChatRoomAllEntries,
 	_addChatRoomEntry,
 	_forceSetChatRoomEntry,
 	_addChatRoomEntries,
 	_removeChatRoomEntry,
 	_forceRemoveChatRoomEntry,
 	_removeChatRoomEntries
-} from './chatroom.js'
+} from '../interface/chatroom/chatroom.js'
 
 import {
 	_syncUltraGroupReadStatus,
-	_loadConversationsForAllChannel,
-	_loadUltraGroupUnreadMentionedCount,
+	_getConversationsForAllChannel,
+	_getUltraGroupUnreadMentionedCount,
 	_modifyUltraGroupMessage,
 	_recallUltraGroupMessage,
 	_clearUltraGroupMessages,
 	_sendUltraGroupTypingStatus,
 	_clearUltraGroupMessagesForAllChannel,
-	_loadBatchRemoteUltraGroupMessages,
+	_getBatchRemoteUltraGroupMessages,
 	_updateUltraGroupMessageExpansion,
 	_removeUltraGroupMessageExpansion,
 	_changeUltraGroupDefaultNotificationLevel,
-	_loadUltraGroupDefaultNotificationLevel,
+	_getUltraGroupDefaultNotificationLevel,
 	_changeUltraGroupChannelDefaultNotificationLevel,
-	_loadUltraGroupChannelDefaultNotificationLevel,
-	_loadUltraGroupAllUnreadCount,
-	_loadUltraGroupAllUnreadMentionedCount,
-	_loadUltraGroupUnreadCount,
- } from "./ultra_group"
+	_getUltraGroupChannelDefaultNotificationLevel,
+	_getUltraGroupAllUnreadCount,
+	_getUltraGroupAllUnreadMentionedCount,
+	_getUltraGroupUnreadCount,
+ } from "../interface/ultra_group/ultra_group.js"
 
 import {
 	_addToBlacklist,
 	_removeFromBlacklist,
-	_loadBlacklistStatus,
-	_loadBlacklist,
+	_getBlacklistStatus,
+	_getBlacklist,
 	_changeNotificationQuietHours,
 	_removeNotificationQuietHours,
-	_loadNotificationQuietHours,
+	_getNotificationQuietHours,
 	_changePushContentShowStatus,
 	_changePushLanguage,
 	_changePushReceiveStatus,
 	_changeLogLevel,
-} from './other.js'
+	_getDeltaTime
+} from '../interface/other/other.js'
 
 export default [
 
@@ -129,31 +130,31 @@ export default [
 			_init,
 			_connect,
 			_disconnect,
-			_initListener,
+			_addListener,
 			_destroy
 		]
 	},
 	{
 		title: '会话相关',
 		list: [
-			_loadConversations,
-			_loadConversation,
+			_getConversations,
+			_getConversation,
 			_removeConversation,
 			_removeConversations,
 			_saveDraftMessage,
-			_loadDraftMessage,
+			_getDraftMessage,
 			_clearDraftMessage,
 			_changeConversationNotificationLevel,
-			_loadConversationNotificationLevel,
+			_getConversationNotificationLevel,
 			_changeConversationTypeNotificationLevel,
-			_loadConversationTypeNotificationLevel,
-			_loadBlockedConversations,
+			_getConversationTypeNotificationLevel,
+			_getBlockedConversations,
 			_changeConversationTopStatus,
-			_setOnConversationTopStatusLoadedListener,
+			_getConversationTopStatus,
 			_syncConversationReadStatus,
 			_searchConversations,
-			_loadMessageCount,
-			_loadTopConversations,
+			_getMessageCount,
+			_getTopConversations,
 		]
 	},
 	{
@@ -172,7 +173,7 @@ export default [
 			_downloadMediaMessage,
 			_cancelDownloadMediaMessage,
 			_sendTypingStatus,
-			_loadMessages,
+			_getMessages,
 			_getMessageById,
 			_getMessageByUId,
 			_getFirstUnreadMessage,
@@ -199,10 +200,10 @@ export default [
 	{
 		title: '未读数相关',
 		list: [
-			_loadUnreadCount,
-			_loadTotalUnreadCount, 
-			_loadUnreadCountByConversationTypes, 
-			_loadUnreadMentionedCount, 
+			_getUnreadCount,
+			_getTotalUnreadCount, 
+			_getUnreadCountByConversationTypes, 
+			_getUnreadMentionedCount, 
 			_clearUnreadCount,
 		]
 	},
@@ -211,11 +212,11 @@ export default [
 		list: [
 			_joinChatRoom,
 			_leaveChatRoom,
-			_loadChatRoomMessages,
+			_getChatRoomMessages,
 			_addChatRoomEntry,
 			_addChatRoomEntries,
-			_loadChatRoomEntry,
-			_loadAllChatRoomEntries,
+			_getChatRoomEntry,
+			_getChatRoomAllEntries,
 			_removeChatRoomEntry,
 			_removeChatRoomEntries
 		]
@@ -224,23 +225,23 @@ export default [
 		title: '超级群相关',
 		list: [
 			_syncUltraGroupReadStatus,
-			_loadConversationsForAllChannel,
-			_loadUltraGroupUnreadMentionedCount,
+			_getConversationsForAllChannel,
+			_getUltraGroupUnreadMentionedCount,
 			_modifyUltraGroupMessage,
 			_recallUltraGroupMessage,
 			_clearUltraGroupMessages,
 			_sendUltraGroupTypingStatus,
 			_clearUltraGroupMessagesForAllChannel,
-			_loadBatchRemoteUltraGroupMessages,
+			_getBatchRemoteUltraGroupMessages,
 			_updateUltraGroupMessageExpansion,
 			_removeUltraGroupMessageExpansion,
 			_changeUltraGroupDefaultNotificationLevel,
-			_loadUltraGroupDefaultNotificationLevel,
+			_getUltraGroupDefaultNotificationLevel,
 			_changeUltraGroupChannelDefaultNotificationLevel,
-			_loadUltraGroupChannelDefaultNotificationLevel,
-			_loadUltraGroupAllUnreadCount,
-			_loadUltraGroupAllUnreadMentionedCount,
-			_loadUltraGroupUnreadCount,
+			_getUltraGroupChannelDefaultNotificationLevel,
+			_getUltraGroupAllUnreadCount,
+			_getUltraGroupAllUnreadMentionedCount,
+			_getUltraGroupUnreadCount,
 		]
 	},
 	{
@@ -248,15 +249,16 @@ export default [
 		list: [
 			_addToBlacklist,
 			_removeFromBlacklist,
-			_loadBlacklistStatus,
-			_loadBlacklist,
+			_getBlacklistStatus,
+			_getBlacklist,
 			_changeNotificationQuietHours,
 			_removeNotificationQuietHours,
-			_loadNotificationQuietHours,
+			_getNotificationQuietHours,
 			_changePushContentShowStatus,
 			_changePushLanguage,
 			_changePushReceiveStatus,
 			_changeLogLevel,
+			_getDeltaTime,
 		]
 	}
 ]

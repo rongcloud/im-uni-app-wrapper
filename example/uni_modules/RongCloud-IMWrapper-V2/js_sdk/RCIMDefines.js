@@ -69,15 +69,15 @@ export var RCIMIWSentStatus;
 export var RCIMIWPushNotificationQuietHoursLevel;
 (function (RCIMIWPushNotificationQuietHoursLevel) {
     /**
-     * 未设置（向上查询群或者APP级别设置） 存量数据中0表示未设置
+     * 未设置。如未设置，SDK 会依次查询消息所属群的用户级别免打扰设置及其他非用户级别设置，再判断是否需要推送通知。
      */
     RCIMIWPushNotificationQuietHoursLevel[RCIMIWPushNotificationQuietHoursLevel["none"] = 0] = "none";
     /**
-     * 群聊超级群仅@消息通知，单聊代表消息不通知
+     * 与融云服务端断开连接后，当前用户仅在指定时段内针对指定会话中提及（@）当前用户和全体群成员的消息接收通知。
      */
     RCIMIWPushNotificationQuietHoursLevel[RCIMIWPushNotificationQuietHoursLevel["mentionMessage"] = 1] = "mentionMessage";
     /**
-     * 消息通知被屏蔽，即不接收消息通知
+     * 当前用户在指定时段内针对任何消息都不接收推送通知。
      */
     RCIMIWPushNotificationQuietHoursLevel[RCIMIWPushNotificationQuietHoursLevel["blocked"] = 2] = "blocked";
 })(RCIMIWPushNotificationQuietHoursLevel || (RCIMIWPushNotificationQuietHoursLevel = {}));
@@ -137,27 +137,27 @@ export var RCIMIWChatRoomMemberActionType;
 export var RCIMIWPushNotificationLevel;
 (function (RCIMIWPushNotificationLevel) {
     /**
-     * 全部消息通知（接收全部消息通知 -- 显示指定关闭免打扰功能）
+     * 与融云服务端断开连接后，当前用户可针对指定类型会话中的所有消息接收通知。
      */
     RCIMIWPushNotificationLevel[RCIMIWPushNotificationLevel["allMessage"] = 0] = "allMessage";
     /**
-     * 未设置（向上查询群或者APP级别设置）//存量数据中0表示未设置
+     * 未设置。未设置时均为此初始状态。
      */
     RCIMIWPushNotificationLevel[RCIMIWPushNotificationLevel["none"] = 1] = "none";
     /**
-     * 群聊，超级群 @所有人 或者 @成员列表有自己 时通知；单聊代表消息不通知
+     * 与融云服务端断开连接后，当前用户仅针对指定类型的会话中提及（@）当前用户和全体群成员的消息接收通知。
      */
     RCIMIWPushNotificationLevel[RCIMIWPushNotificationLevel["mention"] = 2] = "mention";
     /**
-     * 群聊，超级群 @成员列表有自己时通知，@所有人不通知；单聊代表消息不通知
+     * 与融云服务端断开连接后，当前用户仅针对指定类型的会话中提及（@）当前用户的消息接收通知。例如：张三只会接收 “@张三 Hello” 的消息的通知。
      */
     RCIMIWPushNotificationLevel[RCIMIWPushNotificationLevel["mentionUsers"] = 3] = "mentionUsers";
     /**
-     * 群聊，超级群 @所有人通知，其他情况都不通知；单聊代表消息不通知
+     * 与融云服务端断开连接后，当前用户仅针对指定类型的会话中提及（@）全部群成员的消息接收通知。
      */
     RCIMIWPushNotificationLevel[RCIMIWPushNotificationLevel["mentionAll"] = 4] = "mentionAll";
     /**
-     * 消息通知被屏蔽，即不接收消息通知
+     * 当前用户针对指定类型的会话中的任何消息都不接收推送通知。
      */
     RCIMIWPushNotificationLevel[RCIMIWPushNotificationLevel["blocked"] = 5] = "blocked";
 })(RCIMIWPushNotificationLevel || (RCIMIWPushNotificationLevel = {}));
@@ -215,6 +215,10 @@ export var RCIMIWMessageType;
      * 位置消息
      */
     RCIMIWMessageType[RCIMIWMessageType["location"] = 12] = "location";
+    /**
+     * 用户自定义消息
+     */
+    RCIMIWMessageType[RCIMIWMessageType["userCustom"] = 13] = "userCustom";
 })(RCIMIWMessageType || (RCIMIWMessageType = {}));
 export var RCIMIWMessageBlockType;
 (function (RCIMIWMessageBlockType) {
@@ -283,19 +287,19 @@ export var RCIMIWChatRoomStatus;
 export var RCIMIWConversationType;
 (function (RCIMIWConversationType) {
     /**
-     * 暂不支持
+     * 暂不支持，SDK 保留类型，开发者不可使用
      */
     RCIMIWConversationType[RCIMIWConversationType["invalid"] = 0] = "invalid";
     /**
-     * 单聊
+     * 单聊会话
      */
     RCIMIWConversationType[RCIMIWConversationType["private"] = 1] = "private";
     /**
-     * 群聊
+     * 群聊会话
      */
     RCIMIWConversationType[RCIMIWConversationType["group"] = 2] = "group";
     /**
-     * 聊天室
+     * 聊天室会话
      */
     RCIMIWConversationType[RCIMIWConversationType["chatroom"] = 3] = "chatroom";
     /**
@@ -303,7 +307,7 @@ export var RCIMIWConversationType;
      */
     RCIMIWConversationType[RCIMIWConversationType["system"] = 4] = "system";
     /**
-     * 超级群
+     * 超级群会话
      */
     RCIMIWConversationType[RCIMIWConversationType["ultraGroup"] = 5] = "ultraGroup";
 })(RCIMIWConversationType || (RCIMIWConversationType = {}));
@@ -428,4 +432,8 @@ export var RCIMIWConnectionStatus;
      * 自动连接超时，SDK 将不会继续连接，用户需要做超时处理，再自行调用 connectWithToken 接口进行连接
      */
     RCIMIWConnectionStatus[RCIMIWConnectionStatus["timeout"] = 9] = "timeout";
+    /**
+     * 异常情况
+     */
+    RCIMIWConnectionStatus[RCIMIWConnectionStatus["unknown"] = 10] = "unknown";
 })(RCIMIWConnectionStatus || (RCIMIWConnectionStatus = {}));

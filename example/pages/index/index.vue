@@ -5,24 +5,19 @@
 			    <view class="content">
 			    	<view v-for="(inter, _index) in item.list"
 			    		:key="_index">
-			    		<button
-			    			type="primary"
-							plain="true"
-			    			size="mini"
-			    			class="btn"
+			    		<button type="primary" plain="true" size="mini" class="btn"
 							@click="() => { inter.params && inter.params.length ? showForm(inter) : inter.action()}"
 			    		>{{inter.name}}</button>
 			    	</view>
 			    </view>
 			</uni-collapse-item>
 		</uni-collapse>
-		
-		<view class="footer" v-if="resultList.length > 0">
-			<view :style="{color: statusColor[resultList[0].status]}">
-				{{resultList.length - 1}}. {{resultList[0].title}}
-				{{resultList[0].code !== undefined ? '(' : ''}} {{resultList[0].code}} {{resultList[0].code !== undefined ? ')' : ''}}
+		<view class="footer" v-if="resultList.length > 0" >
+			<view class="footer-title" :style="{ flex: 1, color: statusColor[resultList[0].status] }">
+					{{resultList.length - 1}}. {{resultList[0].title}}
+					{{resultList[0].code !== undefined ? '(' : ''}} {{resultList[0].code}} {{resultList[0].code !== undefined ? ')' : ''}}
 			</view>
-			<view class="">
+			<view class="footer-right">
 				<view class="footer-btn" @click="showDetail">
 					详情
 				</view>
@@ -185,7 +180,6 @@
 		flex-wrap: wrap;
 		align-items: flex-start;
 		justify-content: flex-start;
-		
 	}
 	.btn {
 		margin-bottom: 10px;
@@ -200,7 +194,7 @@
 		padding: 10px 7px;
 		display: flex;
 		justify-content: space-between;
-		align-items: center;
+		align-items: space-between;
 		background-color: #c0c0c0;
 		position: fixed;
 		bottom: 0;
@@ -208,12 +202,20 @@
 		right: 0;
 		color: #fff;
 		font-size: 16px;
+		padding-bottom: 0;  
+  		padding-bottom: constant(safe-area-inset-bottom);  
+  		padding-bottom: env(safe-area-inset-bottom);  
+	}
+	.footer-right {
+		width: 65px;
 	}
 	.footer-btn {
-		display: inline-block;
 		margin-left: 5px;
 		padding: 3px;
 		color: #2DB7F5
 	}
-	
+	.footer-title {
+		flex: 1;
+		word-break: break-word;
+	}
 </style>

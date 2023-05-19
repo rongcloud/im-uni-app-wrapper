@@ -198,7 +198,7 @@ const initListener = function() {
 	})
 	
 	//删除消息
-	helper.RCIMIWEngineInstance.setOnMessageClearedListener((res) => {
+	helper.RCIMIWEngineInstance.setOnMessagesClearedListener((res) => {
 		console.log('删除消息 监听：',res)
 		addPrimaryResult({
 			title: 'OnMessageCleared',
@@ -778,7 +778,7 @@ const initListener = function() {
 	})
 	
 	//加载聊天室所有kv
-	helper.RCIMIWEngineInstance.setOnAllChatRoomEntriesLoadedListener((res) => {
+	helper.RCIMIWEngineInstance.setOnChatRoomAllEntriesLoadedListener((res) => {
 		console.log('加载聊天室所有kv 监听：',res)
 		addPrimaryResult({
 			title: 'OnAllChatRoomEntriesLoaded',
@@ -966,7 +966,7 @@ const initListener = function() {
 	})
 	
 	//删除超级群消息扩展信息中特定的键值对
-	helper.RCIMIWEngineInstance.setOnUltraGroupMessageExpansionRemovedListener((res) => {
+	helper.RCIMIWEngineInstance.setOnUltraGroupMessageExpansionForKeysRemovedListener((res) => {
 		console.log('删除超级群消息扩展信息中特定的键值对 监听：',res)
 		addPrimaryResult({
 			title: 'OnUltraGroupMessageExpansionRemoved',

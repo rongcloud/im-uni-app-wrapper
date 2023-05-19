@@ -1,5 +1,5 @@
 declare global {
-    const uni: any;
+    const uni: any
 }
 
-export {};
+export {}

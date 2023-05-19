@@ -15,6 +15,7 @@ export interface RCIMIWAndroidPushOptions {
      * 该条消息针对华为使用的推送渠道，如开发者集成了华为推送，需要指定 channelId 时，可向 Android 端研发人员获取，channelId 由开发者自行创建。
      */
     channelIdHW?: string;
+    categoryHW?: string;
     /**
      * OPPO 的渠道 ID。
      * 该条消息针对 OPPO 使用的推送渠道，如开发者集成了 OPPO 推送，需要指定 channelId 时，可向 Android 端研发人员获取，channelId 由开发者自行创建。
@@ -167,8 +168,17 @@ export interface RCIMIWCompressOptions {
      * 小视频压缩高度，建议使用16的倍数
      */
     sightCompressHeight?: number;
+    /**
+     * 位置消息缩略图压缩比例
+     */
     locationThumbnailQuality?: number;
+    /**
+     * 位置消息压缩的宽度
+     */
     locationThumbnailWidth?: number;
+    /**
+     * 位置消息压缩的高度
+     */
     locationThumbnailHeight?: number;
 }
 export interface RCIMIWEngineOptions {
@@ -193,7 +203,49 @@ export interface RCIMIWEngineOptions {
      * 压缩项配置
      */
     compressOptions?: RCIMIWCompressOptions;
+    /**
+     * 日志级别
+     */
+    logLevel?: RCIMIWLogLevel;
     pushOptions?: RCIMIWPushOptions;
+    enablePush?: boolean;
+    enableIPC?: boolean;
+}
+export interface RCIMIWConnectCallback extends IRCIMIWConnectCallback {
+    onDatabaseOpened: (res: {
+        code: number;
+    }) => void;
+}
+export interface RCIMIWSendMessageCallback extends IRCIMIWSendMessageCallback {
+    onMessageSaved: (res: {
+        message: RCIMIWMessage;
+    }) => void;
+}
+export interface RCIMIWSendMediaMessageListener extends IRCIMIWSendMediaMessageListener {
+    onMediaMessageSaved: (res: {
+        message: RCIMIWMediaMessage;
+    }) => void;
+    onMediaMessageSending: (res: {
+        message: RCIMIWMediaMessage;
+        progress: number;
+    }) => void;
+    onSendingMediaMessageCanceled: (res: {
+        message: RCIMIWMediaMessage;
+    }) => void;
+}
+export interface RCIMIWDownloadMediaMessageListener extends IRCIMIWDownloadMediaMessageListener {
+    onMediaMessageDownloading: (res: {
+        message: RCIMIWMediaMessage;
+        progress: number;
+    }) => void;
+    onDownloadingMediaMessageCanceled: (res: {
+        message: RCIMIWMediaMessage;
+    }) => void;
+}
+export interface RCIMIWSendGroupMessageToDesignatedUsersCallback extends IRCIMIWSendGroupMessageToDesignatedUsersCallback {
+    onMessageSaved: (res: {
+        message: RCIMIWMessage;
+    }) => void;
 }
 export interface RCIMIWUnknownMessage extends RCIMIWMessage {
     /**
@@ -531,7 +583,7 @@ export interface RCIMIWTypingStatus {
      */
     userId?: string;
     /**
-     * 当前正在输入的消息类型名
+     * 当前正在输入的消息类型名，为发送方调用发送接口时传入的 currentType
      * @return
      */
     contentType?: string;
@@ -613,29 +665,29 @@ export interface RCIMIWConversation {
      */
     conversationType?: RCIMIWConversationType;
     /**
-     * 会话 ID
+     * 会话 ID，单聊时为接收方 ID，群组会话中为群组 ID，聊天室会话中为聊天室 ID，系统会话为开发者指定的系统账号 Id
      * @return
      */
     targetId?: string;
     /**
-     * 获取渠道 ID
+     * 频道 ID
      * @return
      */
     channelId?: string;
     /**
-     * 获取未读消息数。
+     * 当前会话未读消息数量
      */
     unreadCount?: number;
     /**
-     * 获取本会话里自己被 @ 的消息数量。
+     * 本会话里自己被 @ 的消息数量
      */
     mentionedCount?: number;
     /**
-     * 获取置顶状态
+     * 本会话是否置顶
      */
     top?: boolean;
     /**
-     * 会话草稿
+     * 会话里保存的草稿信息
      * @return
      */
     draft?: string;
@@ -648,6 +700,11 @@ export interface RCIMIWConversation {
      * @return
      */
     notificationLevel?: RCIMIWPushNotificationLevel;
+    /**
+     * 获取会话第一条未读消息的时间戳，仅对超级群生效
+     * @return
+     */
+    firstUnreadMsgSendTime?: number;
 }
 export interface RCIMIWPushOptions {
     idMI?: string;
@@ -726,15 +783,15 @@ export declare enum RCIMIWSentStatus {
 }
 export declare enum RCIMIWPushNotificationQuietHoursLevel {
     /**
-     * 未设置（向上查询群或者APP级别设置） 存量数据中0表示未设置
+     * 未设置。如未设置，SDK 会依次查询消息所属群的用户级别免打扰设置及其他非用户级别设置，再判断是否需要推送通知。
      */
     none = 0,
     /**
-     * 群聊超级群仅@消息通知，单聊代表消息不通知
+     * 与融云服务端断开连接后，当前用户仅在指定时段内针对指定会话中提及（@）当前用户和全体群成员的消息接收通知。
      */
     mentionMessage = 1,
     /**
-     * 消息通知被屏蔽，即不接收消息通知
+     * 当前用户在指定时段内针对任何消息都不接收推送通知。
      */
     blocked = 2
 }
@@ -790,27 +847,27 @@ export declare enum RCIMIWChatRoomMemberActionType {
 }
 export declare enum RCIMIWPushNotificationLevel {
     /**
-     * 全部消息通知（接收全部消息通知 -- 显示指定关闭免打扰功能）
+     * 与融云服务端断开连接后，当前用户可针对指定类型会话中的所有消息接收通知。
      */
     allMessage = 0,
     /**
-     * 未设置（向上查询群或者APP级别设置）//存量数据中0表示未设置
+     * 未设置。未设置时均为此初始状态。
      */
     none = 1,
     /**
-     * 群聊，超级群 @所有人 或者 @成员列表有自己 时通知；单聊代表消息不通知
+     * 与融云服务端断开连接后，当前用户仅针对指定类型的会话中提及（@）当前用户和全体群成员的消息接收通知。
      */
     mention = 2,
     /**
-     * 群聊，超级群 @成员列表有自己时通知，@所有人不通知；单聊代表消息不通知
+     * 与融云服务端断开连接后，当前用户仅针对指定类型的会话中提及（@）当前用户的消息接收通知。例如：张三只会接收 “@张三 Hello” 的消息的通知。
      */
     mentionUsers = 3,
     /**
-     * 群聊，超级群 @所有人通知，其他情况都不通知；单聊代表消息不通知
+     * 与融云服务端断开连接后，当前用户仅针对指定类型的会话中提及（@）全部群成员的消息接收通知。
      */
     mentionAll = 4,
     /**
-     * 消息通知被屏蔽，即不接收消息通知
+     * 当前用户针对指定类型的会话中的任何消息都不接收推送通知。
      */
     blocked = 5
 }
@@ -866,7 +923,11 @@ export declare enum RCIMIWMessageType {
     /**
      * 位置消息
      */
-    location = 12
+    location = 12,
+    /**
+     * 用户自定义消息
+     */
+    userCustom = 13
 }
 export declare enum RCIMIWMessageBlockType {
     /**
@@ -930,19 +991,19 @@ export declare enum RCIMIWChatRoomStatus {
 }
 export declare enum RCIMIWConversationType {
     /**
-     * 暂不支持
+     * 暂不支持，SDK 保留类型，开发者不可使用
      */
     invalid = 0,
     /**
-     * 单聊
+     * 单聊会话
      */
     private = 1,
     /**
-     * 群聊
+     * 群聊会话
      */
     group = 2,
     /**
-     * 聊天室
+     * 聊天室会话
      */
     chatroom = 3,
     /**
@@ -950,7 +1011,7 @@ export declare enum RCIMIWConversationType {
      */
     system = 4,
     /**
-     * 超级群
+     * 超级群会话
      */
     ultraGroup = 5
 }
@@ -1067,7 +1128,404 @@ export declare enum RCIMIWConnectionStatus {
     /**
      * 自动连接超时，SDK 将不会继续连接，用户需要做超时处理，再自行调用 connectWithToken 接口进行连接
      */
-    timeout = 9
+    timeout = 9,
+    /**
+     * 异常情况
+     */
+    unknown = 10
+}
+export interface IRCIMIWConnectCallback {
+    onConnected: (res: {
+        code: number;
+        userId: string;
+    }) => void;
+    onDatabaseOpened: (res: {
+        code: number;
+    }) => void;
+}
+export interface IRCIMIWSendMessageCallback {
+    onMessageSaved: (res: {
+        message: RCIMIWMessage;
+    }) => void;
+    onMessageSent: (res: {
+        code: number;
+        message: RCIMIWMessage;
+    }) => void;
+}
+export interface IRCIMIWSendMediaMessageListener {
+    onMediaMessageSaved: (res: {
+        message: RCIMIWMediaMessage;
+    }) => void;
+    onMediaMessageSending: (res: {
+        message: RCIMIWMediaMessage;
+        progress: number;
+    }) => void;
+    onSendingMediaMessageCanceled: (res: {
+        message: RCIMIWMediaMessage;
+    }) => void;
+    onMediaMessageSent: (res: {
+        code: number;
+        message: RCIMIWMediaMessage;
+    }) => void;
+}
+export interface IRCIMIWCancelSendingMediaMessageCallback {
+    onCancelSendingMediaMessageCalled: (res: {
+        code: number;
+        message: RCIMIWMediaMessage;
+    }) => void;
+}
+export interface IRCIMIWDownloadMediaMessageListener {
+    onMediaMessageDownloading: (res: {
+        message: RCIMIWMediaMessage;
+        progress: number;
+    }) => void;
+    onDownloadingMediaMessageCanceled: (res: {
+        message: RCIMIWMediaMessage;
+    }) => void;
+    onMediaMessageDownloaded: (res: {
+        code: number;
+        message: RCIMIWMediaMessage;
+    }) => void;
+}
+export interface IRCIMIWCancelDownloadingMediaMessageCallback {
+    onCancelDownloadingMediaMessageCalled: (res: {
+        code: number;
+        message: RCIMIWMediaMessage;
+    }) => void;
+}
+export interface IRCIMIWGetConversationCallback extends IRCIMIWObjectCallback<RCIMIWConversation> {
+}
+export interface IRCIMIWObjectCallback<T> {
+    onSuccess: (res: {
+        t: T;
+    }) => void;
+    onError: (res: {
+        code: number;
+    }) => void;
+}
+export interface IRCIMIWGetConversationsCallback extends IRCIMIWObjectCallback<Array<RCIMIWConversation>> {
+}
+export interface IRCIMIWRemoveConversationCallback {
+    onConversationRemoved: (res: {
+        code: number;
+    }) => void;
+}
+export interface IRCIMIWRemoveConversationsCallback {
+    onConversationsRemoved: (res: {
+        code: number;
+    }) => void;
+}
+export interface IRCIMIWGetUnreadCountCallback extends IRCIMIWObjectCallback<number> {
+}
+export interface IRCIMIWGetTotalUnreadCountCallback extends IRCIMIWObjectCallback<number> {
+}
+export interface IRCIMIWGetUnreadMentionedCountCallback extends IRCIMIWObjectCallback<number> {
+}
+export interface IRCIMIWGetUltraGroupAllUnreadCountCallback extends IRCIMIWObjectCallback<number> {
+}
+export interface IRCIMIWGetUltraGroupAllUnreadMentionedCountCallback extends IRCIMIWObjectCallback<number> {
+}
+export interface IRCIMIWGetUltraGroupUnreadCountCallback extends IRCIMIWObjectCallback<number> {
+}
+export interface IRCIMIWGetUltraGroupUnreadMentionedCountCallback extends IRCIMIWObjectCallback<number> {
+}
+export interface IRCIMIWGetUnreadCountByConversationTypesCallback extends IRCIMIWObjectCallback<number> {
+}
+export interface IRCIMIWClearUnreadCountCallback {
+    onUnreadCountCleared: (res: {
+        code: number;
+    }) => void;
+}
+export interface IRCIMIWSaveDraftMessageCallback {
+    onDraftMessageSaved: (res: {
+        code: number;
+    }) => void;
+}
+export interface IRCIMIWGetDraftMessageCallback extends IRCIMIWObjectCallback<string> {
+}
+export interface IRCIMIWClearDraftMessageCallback {
+    onDraftMessageCleared: (res: {
+        code: number;
+    }) => void;
+}
+export interface IRCIMIWGetBlockedConversationsCallback extends IRCIMIWObjectCallback<Array<RCIMIWConversation>> {
+}
+export interface IRCIMIWChangeConversationTopStatusCallback {
+    onConversationTopStatusChanged: (res: {
+        code: number;
+    }) => void;
+}
+export interface IRCIMIWGetConversationTopStatusCallback extends IRCIMIWObjectCallback<Boolean> {
+}
+export interface IRCIMIWSyncConversationReadStatusCallback {
+    onConversationReadStatusSynced: (res: {
+        code: number;
+    }) => void;
+}
+export interface IRCIMIWGetMessagesCallback extends IRCIMIWObjectCallback<Array<RCIMIWMessage>> {
+}
+export interface IRCIMIWGetMessageCallback extends IRCIMIWObjectCallback<RCIMIWMessage> {
+}
+export interface IRCIMIWGetFirstUnreadMessageCallback extends IRCIMIWObjectCallback<RCIMIWMessage> {
+}
+export interface IRCIMIWGetUnreadMentionedMessagesCallback extends IRCIMIWObjectCallback<Array<RCIMIWMessage>> {
+}
+export interface IRCIMIWInsertMessageCallback {
+    onMessageInserted: (res: {
+        code: number;
+        message: RCIMIWMessage;
+    }) => void;
+}
+export interface IRCIMIWInsertMessagesCallback {
+    onMessagesInserted: (res: {
+        code: number;
+        messages: Array<RCIMIWMessage>;
+    }) => void;
+}
+export interface IRCIMIWClearMessagesCallback {
+    onMessagesCleared: (res: {
+        code: number;
+    }) => void;
+}
+export interface IRCIMIWDeleteLocalMessagesCallback {
+    onLocalMessagesDeleted: (res: {
+        code: number;
+        messages: Array<RCIMIWMessage>;
+    }) => void;
+}
+export interface IRCIMIWDeleteMessagesCallback {
+    onMessagesDeleted: (res: {
+        code: number;
+        messages: Array<RCIMIWMessage>;
+    }) => void;
+}
+export interface IRCIMIWRecallMessageCallback {
+    onMessageRecalled: (res: {
+        code: number;
+        message: RCIMIWMessage;
+    }) => void;
+}
+export interface IRCIMIWSendPrivateReadReceiptMessageCallback {
+    onPrivateReadReceiptMessageSent: (res: {
+        code: number;
+    }) => void;
+}
+export interface IRCIMIWSendGroupReadReceiptRequestCallback {
+    onGroupReadReceiptRequestSent: (res: {
+        code: number;
+        message: RCIMIWMessage;
+    }) => void;
+}
+export interface IRCIMIWSendGroupReadReceiptResponseCallback {
+    onGroupReadReceiptResponseSent: (res: {
+        code: number;
+        message: Array<RCIMIWMessage>;
+    }) => void;
+}
+export interface IRCIMIWUpdateMessageExpansionCallback {
+    onMessageExpansionUpdated: (res: {
+        code: number;
+    }) => void;
+}
+export interface IRCIMIWRemoveMessageExpansionForKeysCallback {
+    onMessageExpansionForKeysRemoved: (res: {
+        code: number;
+    }) => void;
+}
+export interface IRCIMIWChangeMessageSentStatusCallback {
+    onMessageSentStatusChanged: (res: {
+        code: number;
+    }) => void;
+}
+export interface IRCIMIWChangeMessageReceivedStatusCallback {
+    onMessageReceiveStatusChanged: (res: {
+        code: number;
+    }) => void;
+}
+export interface IRCIMIWJoinChatRoomCallback {
+    onChatRoomJoined: (res: {
+        code: number;
+        targetId: string;
+    }) => void;
+}
+export interface IRCIMIWLeaveChatRoomCallback {
+    onChatRoomLeft: (res: {
+        code: number;
+        targetId: string;
+    }) => void;
+}
+export interface IRCIMIWGetChatRoomMessagesCallback extends IRCIMIWObjectCallback<Array<RCIMIWMessage>> {
+}
+export interface IRCIMIWAddChatRoomEntryCallback {
+    onChatRoomEntryAdded: (res: {
+        code: number;
+    }) => void;
+}
+export interface IRCIMIWAddChatRoomEntriesCallback {
+    onChatRoomEntriesAdded: (res: {
+        code: number;
+        errors: {
+            [propName: string]: number;
+        };
+    }) => void;
+}
+export interface IRCIMIWGetChatRoomEntryCallback extends IRCIMIWObjectCallback<Map<String, String>> {
+}
+export interface IRCIMIWGetChatRoomAllEntriesCallback extends IRCIMIWObjectCallback<Map<String, String>> {
+}
+export interface IRCIMIWRemoveChatRoomEntryCallback {
+    onChatRoomEntryRemoved: (res: {
+        code: number;
+    }) => void;
+}
+export interface IRCIMIWRemoveChatRoomEntriesCallback {
+    onChatRoomEntriesRemoved: (res: {
+        code: number;
+    }) => void;
+}
+export interface IRCIMIWAddToBlacklistCallback {
+    onBlacklistAdded: (res: {
+        code: number;
+        userId: string;
+    }) => void;
+}
+export interface IRCIMIWRemoveFromBlacklistCallback {
+    onBlacklistRemoved: (res: {
+        code: number;
+        userId: string;
+    }) => void;
+}
+export interface IRCIMIWGetBlacklistStatusCallback extends IRCIMIWObjectCallback<RCIMIWBlacklistStatus> {
+}
+export interface IRCIMIWGetBlacklistCallback extends IRCIMIWObjectCallback<Array<String>> {
+}
+export interface IRCIMIWSearchMessagesCallback extends IRCIMIWObjectCallback<Array<RCIMIWMessage>> {
+}
+export interface IRCIMIWSearchMessagesByTimeRangeCallback extends IRCIMIWObjectCallback<Array<RCIMIWMessage>> {
+}
+export interface IRCIMIWSearchMessagesByUserIdCallback extends IRCIMIWObjectCallback<Array<RCIMIWMessage>> {
+}
+export interface IRCIMIWSearchConversationsCallback extends IRCIMIWObjectCallback<Array<RCIMIWSearchConversationResult>> {
+}
+export interface IRCIMIWChangeNotificationQuietHoursCallback {
+    onNotificationQuietHoursChanged: (res: {
+        code: number;
+    }) => void;
+}
+export interface IRCIMIWRemoveNotificationQuietHoursCallback {
+    onNotificationQuietHoursRemoved: (res: {
+        code: number;
+    }) => void;
+}
+export interface IRCIMIWGetNotificationQuietHoursCallback {
+    onSuccess: (res: {
+        startTime: string;
+        spanMinutes: number;
+        level: RCIMIWPushNotificationQuietHoursLevel;
+    }) => void;
+    onError: (res: {
+        code: number;
+    }) => void;
+}
+export interface IRCIMIWChangeConversationNotificationLevelCallback {
+    onConversationNotificationLevelChanged: (res: {
+        code: number;
+    }) => void;
+}
+export interface IRCIMIWGetConversationNotificationLevelCallback extends IRCIMIWObjectCallback<RCIMIWPushNotificationLevel> {
+}
+export interface IRCIMIWChangeConversationTypeNotificationLevelCallback {
+    onConversationTypeNotificationLevelChanged: (res: {
+        code: number;
+    }) => void;
+}
+export interface IRCIMIWGetConversationTypeNotificationLevelCallback extends IRCIMIWObjectCallback<RCIMIWPushNotificationLevel> {
+}
+export interface IRCIMIWChangeUltraGroupDefaultNotificationLevelCallback {
+    onUltraGroupDefaultNotificationLevelChanged: (res: {
+        code: number;
+    }) => void;
+}
+export interface IRCIMIWGetUltraGroupDefaultNotificationLevelCallback extends IRCIMIWObjectCallback<RCIMIWPushNotificationLevel> {
+}
+export interface IRCIMIWChangeUltraGroupChannelDefaultNotificationLevelCallback {
+    onUltraGroupChannelDefaultNotificationLevelChanged: (res: {
+        code: number;
+    }) => void;
+}
+export interface IRCIMIWGetUltraGroupChannelDefaultNotificationLevelCallback extends IRCIMIWObjectCallback<RCIMIWPushNotificationLevel> {
+}
+export interface IRCIMIWChangePushContentShowStatusCallback {
+    onPushContentShowStatusChanged: (res: {
+        code: number;
+    }) => void;
+}
+export interface IRCIMIWChangePushLanguageCallback {
+    onPushLanguageChanged: (res: {
+        code: number;
+    }) => void;
+}
+export interface IRCIMIWChangePushReceiveStatusCallback {
+    onPushReceiveStatusChanged: (res: {
+        code: number;
+    }) => void;
+}
+export interface IRCIMIWSendGroupMessageToDesignatedUsersCallback extends IRCIMIWSendMessageCallback {
+}
+export interface IRCIMIWGetMessageCountCallback extends IRCIMIWObjectCallback<number> {
+}
+export interface IRCIMIWGetTopConversationsCallback extends IRCIMIWObjectCallback<Array<RCIMIWConversation>> {
+}
+export interface IRCIMIWSyncUltraGroupReadStatusCallback {
+    onUltraGroupReadStatusSynced: (res: {
+        code: number;
+    }) => void;
+}
+export interface IRCIMIWGetConversationsForAllChannelCallback extends IRCIMIWObjectCallback<Array<RCIMIWConversation>> {
+}
+export interface IRCIMIWModifyUltraGroupMessageCallback {
+    onUltraGroupMessageModified: (res: {
+        code: number;
+    }) => void;
+}
+export interface IRCIMIWRecallUltraGroupMessageCallback {
+    onUltraGroupMessageRecalled: (res: {
+        code: number;
+    }) => void;
+}
+export interface IRCIMIWClearUltraGroupMessagesCallback {
+    onUltraGroupMessagesCleared: (res: {
+        code: number;
+    }) => void;
+}
+export interface IRCIMIWSendUltraGroupTypingStatusCallback {
+    onUltraGroupTypingStatusSent: (res: {
+        code: number;
+    }) => void;
+}
+export interface IRCIMIWClearUltraGroupMessagesForAllChannelCallback {
+    onUltraGroupMessagesClearedForAllChannel: (res: {
+        code: number;
+    }) => void;
+}
+export interface IRCIMIWGetBatchRemoteUltraGroupMessagesCallback {
+    onSuccess: (res: {
+        matchedMessages: Array<RCIMIWMessage>;
+        notMatchedMessages: Array<RCIMIWMessage>;
+    }) => void;
+    onError: (res: {
+        code: number;
+    }) => void;
+}
+export interface IRCIMIWUpdateUltraGroupMessageExpansionCallback {
+    onUltraGroupMessageExpansionUpdated: (res: {
+        code: number;
+    }) => void;
+}
+export interface IRCIMIWRemoveUltraGroupMessageExpansionForKeysCallback {
+    onUltraGroupMessageExpansionForKeysRemoved: (res: {
+        code: number;
+    }) => void;
 }
 /**
  * 收到消息的监听
@@ -1164,8 +1622,9 @@ export interface OnTypingStatusChangedResult {
 }
 /**
  * 同步消息未读状态监听接口。多端登录，收到其它端清除某一会话未读数通知的时候
- * @param type     会话类型
- * @param targetId 会话 ID
+ * @param type      会话类型
+ * @param targetId  会话 ID
+ * @param timestamp 时间戳
  */
 export interface OnConversationReadStatusSyncMessageReceivedResult {
     type: RCIMIWConversationType;
@@ -1415,6 +1874,11 @@ export interface OnUltraGroupAllUnreadCountLoadedResult {
 export interface OnUltraGroupAllUnreadMentionedCountLoadedResult {
     code: number;
     count: number;
+}
+/**
+ * 超级群列表同步完成的回调
+ */
+export interface OnUltraGroupConversationsSyncedResult {
 }
 /**
  * [clearUnreadCount] 的接口监听
@@ -1684,7 +2148,7 @@ export interface OnMessagesInsertedResult {
  * @param channelId 频道 ID，仅支持超级群使用，其他会话类型传 null 即可。
  * @param timestamp 时间戳
  */
-export interface OnMessageClearedResult {
+export interface OnMessagesClearedResult {
     code: number;
     type: RCIMIWConversationType;
     targetId: string;
@@ -1781,6 +2245,7 @@ export interface OnMessageSentStatusChangedResult {
 }
 /**
  * [joinChatRoom] 的接口监听
+ * @param code     接口回调的状态码，0 代表成功，非 0 代表出现异常
  * @param targetId 会话 ID
  */
 export interface OnChatRoomJoinedResult {
@@ -1796,6 +2261,7 @@ export interface OnChatRoomJoiningResult {
 }
 /**
  * [leaveChatRoom] 的接口监听
+ * @param code     接口回调的状态码，0 代表成功，非 0 代表出现异常
  * @param targetId 会话 ID
  */
 export interface OnChatRoomLeftResult {
@@ -1857,12 +2323,12 @@ export interface OnChatRoomEntryLoadedResult {
     };
 }
 /**
- * [loadAllChatRoomEntries] 的接口监听
+ * [loadChatRoomAllEntries] 的接口监听
  * @param code     接口回调的状态码，0 代表成功，非 0 代表出现异常
  * @param targetId 会话 ID
  * @param entries  获取到的属性集合。
  */
-export interface OnAllChatRoomEntriesLoadedResult {
+export interface OnChatRoomAllEntriesLoadedResult {
     code: number;
     targetId: string;
     entries: {
@@ -2039,12 +2505,13 @@ export interface OnGroupReadReceiptResponseSentResult {
  * [changeNotificationQuietHours] 的接口回调
  * @param code      接口回调的状态码，0 代表成功，非 0 代表出现异常
  * @param startTime 开始消息免打扰时间
- * @param spanMins  需要消息免打扰分钟数，0 < spanMins < 1440（ 比如，您设置的起始时间是 00：00， 结束时间为 01:00，则 spanMins 为 60 分钟。设置为 1439 代表全天免打扰 （23  60 + 59 = 1439 ））
+ * @param spanMinutes  需要消息免打扰分钟数，0 < spanMinutes < 1440（ 比如，您设置的起始时间是 00：00， 结束时间为 01:00，则 spanMinutes 为 60 分钟。设置为 1439 代表全天免打扰 （23  60 + 59 = 1439 ））
+ * @param level     消息通知级别
  */
 export interface OnNotificationQuietHoursChangedResult {
     code: number;
     startTime: string;
-    spanMins: number;
+    spanMinutes: number;
     level: RCIMIWPushNotificationQuietHoursLevel;
 }
 /**
@@ -2056,14 +2523,15 @@ export interface OnNotificationQuietHoursRemovedResult {
 }
 /**
  * [loadNotificationQuietHours] 的接口回调
- * @param code      接口回调的状态码，0 代表成功，非 0 代表出现异常
- * @param startTime 开始消息免打扰时间
- * @param spanMins  已设置的屏蔽时间分钟数，0 < spanMins < 1440]
+ * @param code        接口回调的状态码，0 代表成功，非 0 代表出现异常
+ * @param startTime   开始消息免打扰时间
+ * @param spanMinutes 已设置的屏蔽时间分钟数，0 < spanMinutes < 1440
+ * @param level       消息通知级别
  */
 export interface OnNotificationQuietHoursLoadedResult {
     code: number;
     startTime: string;
-    spanMins: number;
+    spanMinutes: number;
     level: RCIMIWPushNotificationQuietHoursLevel;
 }
 /**
@@ -2331,7 +2799,7 @@ export interface OnUltraGroupMessagesClearedForAllChannelResult {
  * @param code         接口回调的状态码，0 代表成功，非 0 代表出现异常
  * @param targetId     会话 ID
  * @param channelId    频道 ID，仅支持超级群使用，其他会话类型传 null 即可。
- * @param typingStatus
+ * @param typingStatus 输入状态枚举
  */
 export interface OnUltraGroupTypingStatusSentResult {
     code: number;
@@ -2364,12 +2832,12 @@ export interface OnUltraGroupMessageExpansionUpdatedResult {
     messageUId: string;
 }
 /**
- * [removeUltraGroupMessageExpansion] 的接口监听
+ * [removeUltraGroupMessageExpansionForKeys] 的接口监听
  * @param code       接口回调的状态码，0 代表成功，非 0 代表出现异常
  * @param messageUId 消息的 messageUid
  * @param keys       消息扩展信息中待删除的 key 的列表
  */
-export interface OnUltraGroupMessageExpansionRemovedResult {
+export interface OnUltraGroupMessageExpansionForKeysRemovedResult {
     code: number;
     messageUId: string;
     keys: Array<string>;

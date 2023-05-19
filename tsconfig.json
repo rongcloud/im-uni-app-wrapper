@@ -10,5 +10,12 @@
         "removeComments": false
     },
     "include": ["src"],
-    "exclude": ["node_modules"]
+    "exclude": ["node_modules"],
+    "typedocOptions": {
+        "exclude": "src/uni.d.ts",
+        "out": "build/docs",
+        "name": "RongCloud-IMWrapper-V2",
+        "includeVersion": true,
+        "readme": "README-APIDoc.md",
+    }
 }
