@@ -45,13 +45,15 @@
 初始化时需要传入上文获取的 App Key。引擎配置请参见官方文档。
 
 ```ts
-let appkey = 'xxx';
+let appKey = 'xxx';
+// 初始化配置，没有可传 {}
 let options = {};
 let engine = null;
-//需要使用 await 或者 .then
-RCIMIWEngine.create(appKey,options).then((res) => {
-  console.log('初始化引擎res---', res)
-  engine = res
+// 需要使用 await 或者 .then
+RCIMIWEngine.create(appKey, options).then((res) => {
+  // 这里打印 {} 代表初始化成功
+  console.log('初始化引擎res---', res);
+  engine = res;
 });
 ```
 
@@ -76,23 +78,29 @@ RCIMIWEngine.create(appKey,options).then((res) => {
 
     提交后，可在左侧**结果**中取得 Token 字符串。
 
-1. 设置获取连接状态的监听器：
+1. 设置获取连接状态的监听器。使用 setOnConnectionStatusChangedListener 监听 IM 连接状态的变化，连接状态发生变化时返回 RCIMIWConnectionStatus。详见[连接状态监听](https://doc.rongcloud.cn/im/uni-app/5.X/noui/connect/listener)。
 
     ```ts
-    engine.setOnConnectedListener((res) => {
-      console.log('链接 监听：',res)
-    })
+    engine.setOnConnectionStatusChangedListener(({status}) => {
+      console.log('连接状态变化监听：', status);
+    });
     ```
 
-    - `res.code` 连接状态码，0 代表连接成功。
-    - `res.userId` 连接成功的用户 id。
-
-1. 使用上方获取的 Token, 连接到融云服务器。
+2. 使用上方获取的 Token, 连接到融云服务器。
 
     ```ts
-    let token = 'xxx'
-    let timeout = 6
-    let code = await engine.connect(token,timeout)
+    let token = 'xxx';
+    // 默认为 0 即可
+    let timeout = 0;
+    let callback = {
+      onDatabaseOpened:({code}) => {
+        //本地数据库打开状态
+      },
+      onConnected:({code, userId}) => {
+        // 连接成功
+      }
+    };
+    let code = await engine.connect(token, timeout, callback);
     ```
 
 SDK 已实现自动重连机制。
@@ -107,8 +115,8 @@ SDK 已实现自动重连机制。
 
   ```ts
   engine.setOnMessageReceivedListener((res) => {
-    console.log('收到的消息 监听',res)
-  })
+    console.log('收到的消息 监听',res);
+  });
   ```
   - `res.message` 接收到的消息对象。
   - `res.left` 当客户端连接成功后，服务端会将所有补偿消息以消息包的形式下发给客户端，最多每 200 条消息为一个消息包，即一个 Package, 客户端接受到消息包后，会逐条解析并通知应用。left 为当前消息包（Package）里还剩余的消息条数。
@@ -119,38 +127,35 @@ SDK 已实现自动重连机制。
 #### 发送消息 {#sendmessage}
 
 ```ts
-let conversationType = RCIMIWConversationType.PRIVATE;
+import RCIMIWEngine from "@/uni_modules/RongCloud-IMWrapper-V2/js_sdk/RCIMEngine"
+import { RCIMIWConversationType } from "@/uni_modules/RongCloud-IMWrapper-V2/js_sdk/RCIMDefines"
+
+// 会话类型，使用 RCIMIWConversationType 需要 import 导入这个枚举类型
+let conversationType = RCIMIWConversationType.private;
+// 目标 id
 let targetId = 'xxx';
-let channelId = 'xxx';
+// 频道 id，没有可传空字符串
+let channelId = '';
+// 消息内容
 let text = '一条文本消息';
-//创建消息实体
-let message = await engine.createTextMessage(conversationType,targetId,channelId,text)
-//将构造的消息发送出去
-let code = await engine.sendMessage(message)
+// 创建消息实体
+let message = await engine.createTextMessage(conversationType, targetId, channelId, text);
+// 将构造的消息发送出去
+let callback = {
+  onMessageSaved:(res) => {
+    // 消息保存到本地数据库的回调
+  },
+  onMessageSent:(res) => {
+    // 消息发送结果的回调
+  }
+};
+let code = await engine.sendMessage(message, callback); 
 ```
-
-#### 监听消息发送结果 {#msgreceiver}
-
-```ts
-// 消息存入数据库的监听
-engine.setOnMessageAttachedListener((res) => {
-  console.log('发送消息-Attached 监听：',res)
-})
-```
-- `res.message` 消息对象。
-
-```ts
-// 发送消息的监听
-engine.setOnMessageSentListener((res) => {
-  console.log('发送消息-Sent 监听：',res)
-})
-```
-- `res.code` 返回值，0 代表成功。
-- `res.message` 消息对象。
 
 #### 退出登录
 
 ```ts
+// 退出登录后是否继续接收推送
 let receivePush = true
 let code = await engine.disconnect(receivePush);
 ```
