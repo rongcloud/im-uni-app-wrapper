@@ -24,6 +24,7 @@ import {
 	_searchConversations,
 	_getMessageCount,
 	_getTopConversations,
+	_getUnreadConversations,
  } from '../interface/conversation/conversation.js'
  
 import {
@@ -36,6 +37,8 @@ import {
 	_sendGIFMessage,
 	_sendLocationMessage,
 	_sendCustomMessage,
+	_sendNativeCustomMessage,
+	_sendNativeCustomMediaMessage,
 	_cancelSendMediaMessage,
 	_downloadMediaMessage,
 	_cancelDownloadMediaMessage,
@@ -62,6 +65,8 @@ import {
 	_searchMessagesByTimeRange,
 	_searchMessagesByUserId,
 	_sendGroupMessageToDesignatedUsers,
+	_registerNativeCustomMessage,
+	_registerNativeCustomMediaMessage,
 } from '../interface/message/message.js'
 
 import {
@@ -119,7 +124,8 @@ import {
 	_changePushLanguage,
 	_changePushReceiveStatus,
 	_changeLogLevel,
-	_getDeltaTime
+	_getDeltaTime,
+	_registerPushToken,
 } from '../interface/other/other.js'
 
 export default [
@@ -155,11 +161,14 @@ export default [
 			_searchConversations,
 			_getMessageCount,
 			_getTopConversations,
+			_getUnreadConversations,
 		]
 	},
 	{
 		title: '消息相关',
 		list: [
+			_registerNativeCustomMessage,
+			_registerNativeCustomMediaMessage,
 			_sendTextMessage,
 			_sendImageMessage,
 			_sendFileMessage,
@@ -169,6 +178,8 @@ export default [
 			_sendGIFMessage,
 			_sendLocationMessage,
 			_sendCustomMessage,
+			_sendNativeCustomMessage,
+			_sendNativeCustomMediaMessage,
 			_cancelSendMediaMessage,
 			_downloadMediaMessage,
 			_cancelDownloadMediaMessage,
@@ -259,6 +270,7 @@ export default [
 			_changePushReceiveStatus,
 			_changeLogLevel,
 			_getDeltaTime,
+			_registerPushToken,
 		]
 	}
 ]

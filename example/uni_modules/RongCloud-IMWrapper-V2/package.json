@@ -1,10 +1,11 @@
 {
   "id": "RongCloud-IMWrapper-V2",
   "displayName": "RongCloud-IMWrapper-V2",
-  "version": "5.4.0",
+  "version": "5.12.1",
   "description": "融云IM原生插件包装层",
   "keywords": [
-    "RongCloud-IMWrapper-V2"
+    "RongCloud",
+    "IM"
 ],
   "repository": "",
   "engines": {
@@ -40,8 +41,8 @@
       },
       "client": {
         "Vue": {
-          "vue2": "n",
-          "vue3": "n"
+          "vue2": "y",
+          "vue3": "y"
         },
         "App": {
           "app-vue": "y",

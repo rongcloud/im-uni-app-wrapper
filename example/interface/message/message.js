@@ -9,6 +9,8 @@ import {
 	sendGIFMessage,
 	sendLocationMessage,
 	sendCustomMessage,
+	sendNativeCustomMessage,
+	sendNativeCustomMediaMessage,
 	cancelSendingMediaMessage,
 	downloadMediaMessage,
 	cancelDownloadingMediaMessage,
@@ -38,7 +40,27 @@ import {
 	searchMessages,
 	searchMessagesByTimeRange,
 	searchMessagesByUserId,
+	registerNativeCustomMessage,
+	registerNativeCustomMediaMessage,
 } from '../../function/engine_func_auto.js'
+
+export const _registerNativeCustomMessage = {
+	name: '注册原生自定义普通消息',
+	params: [
+		{ key: 'messageIdentifier', value: 'MP:PokeMsg', type: 'string', name: '请输入标识符', placeholder: ''},
+		{ key: 'persistentFlag', value: '2', type: 'number', name: '请输入会话类型:0:不存不计(命令),1:只存不计数,2:存储计数,3:状态', placeholder: ''},
+	],
+	action: registerNativeCustomMessage,
+}
+
+export const _registerNativeCustomMediaMessage = {
+	name: '注册原生自定义媒体消息',
+	params: [
+		{ key: 'messageIdentifier', value: 'MP:PokeMediaMsg', type: 'string', name: '请输入标识符', placeholder: ''},
+		{ key: 'persistentFlag', value: '2', type: 'number', name: '请输入会话类型:0:不存不计(命令),1:只存不计数,2:存储计数,3:状态', placeholder: ''},
+	],
+	action: registerNativeCustomMediaMessage,
+}
 
 export const _sendTextMessage = {
 	name: "\xa0\xa0发送文本消息\xa0\xa0",
@@ -49,6 +71,10 @@ export const _sendTextMessage = {
 		{ key: 'content', value: '', type: 'string', name: '请输入发送文本', placeholder: '' },
 		{ key: 'pushContent', value: '', type: 'string', name: '请输入需要显示的推送内容', placeholder: '非必填'},
 		{ key: 'pushData', value: '', type:'string', name: '请输入携带的推送数据', placeholder: '非必填'},
+		{ key: 'pushTypeVIVO', value: '', type: 'number', name: 'vivo 推送通道类型', placeholder: '非必填, 0 运营, 1 系统'},
+		{ key: 'categoryVivo', value: '', type: 'string', name: 'vivo 推送消息分类', placeholder: '非必填'},
+		{ key: 'imageUrlHonor', value: '', type: 'number', name: '荣耀推送通知栏右侧图标', placeholder: '非必填'},
+		{ key: 'importanceHonor', value: '', type: 'string', name: '荣耀推送消息级别', placeholder: '非必填, 0 服务与通讯类 1 资讯营销类'},
 		{ key: 'extra', value: '', type:'string', name: '消息的附加字段', placeholder: '非必填'},
 		{ key: 'userId', value: '', type:'string', name: '用户信息Id', placeholder: '非必填'},
 		{ key: 'name', value: '', type:'string', name: '用户信息名称', placeholder: '非必填'},
@@ -171,6 +197,32 @@ export const _sendCustomMessage = {
 		{ key: 'pushData', value: '', type:'string', name: '请输入携带的推送数据', placeholder: '非必填'},
 	],
 	action: sendCustomMessage,
+}
+
+export const _sendNativeCustomMessage = {
+	name: "发送原生自定义普通消息",
+	params: [
+		{ key: 'conversationType', value: '', type: 'number', name: '请输入会话类型:1:单聊,2:群聊,3:聊天室,4:系统,5:超级群', placeholder: ''},
+		{ key: 'targetId', value: '', type: 'string', name: '请输入会话Id', placeholder: ''},
+		{ key: 'channelId', value: '', type: 'string', name: '请输入频道Id', placeholder: '仅对超级群生效,其他类型无需填写'},
+		{ key: 'messageIdentifier', value: 'MP:PokeMsg', type: 'string', name: '请输入标识符', placeholder: ''},
+		{ key: 'fields', value: '{"content":"uni-app 发送的红包消息", "userIds": ["u1", "u2"], "pokeExtra": {"key1": {"k": "v"}}}', type: 'string', name: '请输入 json 格式的内容', placeholder: '请输入 json 格式的内容'},
+		{ key: 'searchableWords', value: '', type: 'string', name: '请输入搜索关键字', placeholder: '多个以英文 , 隔开 eg:a,b'}
+	],
+	action: sendNativeCustomMessage,
+}
+
+export const _sendNativeCustomMediaMessage = {
+	name: "发送原生自定义媒体消息",
+	params: [
+		{ key: 'conversationType', value: '', type: 'number', name: '请输入会话类型:1:单聊,2:群聊,3:聊天室,4:系统,5:超级群', placeholder: ''},
+		{ key: 'targetId', value: '', type: 'string', name: '请输入会话Id', placeholder: ''},
+		{ key: 'channelId', value: '', type: 'string', name: '请输入频道Id', placeholder: '仅对超级群生效,其他类型无需填写'},
+		{ key: 'messageIdentifier', value: 'MP:PokeMediaMsg', type: 'string', name: '请输入标识符', placeholder: ''},
+		{ key: 'fields', value: '{"content":"uni-app 发送的红包媒体消息", "userIds": ["u1", "u2"], "pokeExtra": {"key1": {"k": "v"}}}', type: 'string', name: '请输入 json 格式的内容', placeholder: '请输入 json 格式的内容'},
+		{ key: 'searchableWords', value: '', type: 'string', name: '请输入搜索关键字', placeholder: '多个以英文 , 隔开 eg:a,b'}
+	],
+	action: sendNativeCustomMediaMessage,
 }
 
 export const _cancelSendMediaMessage = {

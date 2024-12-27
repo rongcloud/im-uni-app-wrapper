@@ -9,6 +9,7 @@ export const _init = {
 		{ key: 'naviServer', value: '', type: 'string', name: '请输入导航地址', placeholder: '非必填'},
 		{ key: 'fileServer', value: '', type: 'string', name: '请输入文件地址', placeholder: '非必填'},
 		{ key: 'statisticServer', value: '', type: 'string', name: '请输入状态上传地址', placeholder: '非必填'},
+		{ key: 'areaCode', value: '', type: 'string', name: '请输入区域码', placeholder: '非必填，默认北京'},
 		{ key: 'kickReconnectDevice', value: true, type: 'boolean', name: '是否踢出其他重连设备'},
 		{ key: 'originalImageQuality', value: '', type: 'number', name: '请输入原图压缩比', placeholder: '非必填'},
 		{ key: 'originalImageMaxSize', value: '', type: 'number', name: '原图大小限制 配置发送图片时，如果图片大小不超过则发送原图', placeholder: '非必填'},

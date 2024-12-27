@@ -13,6 +13,10 @@ import {
     getDeltaTime,
 } from '../../function/engine_func_auto.js';
 
+import {
+	registerPushToken,
+} from '../../function/engine_func.js'
+
 export const _addToBlacklist = {
     name: "将某个用户加入黑名单",
     params: [
@@ -98,4 +102,13 @@ export const _getDeltaTime = {
 	name: "获取服务器时间差",
 	params:[],
 	action: getDeltaTime,
+}
+
+export const _registerPushToken = {
+    name: "上报推送 token",
+    params: [
+				{ key: 'pushType', value: '', type: 'string', name: '推送类型 0:iOS,3:华为,4:小米,7:魅族,8:vivo,9:oppo,10:honor', placeholder: '' },
+        { key: 'pushToken', value: '', type: 'string', name: '推送 token', placeholder: '' },
+    ],
+    action: registerPushToken,
 }

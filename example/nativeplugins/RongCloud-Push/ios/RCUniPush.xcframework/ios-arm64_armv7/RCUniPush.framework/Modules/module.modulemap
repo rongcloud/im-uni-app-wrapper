@@ -1,0 +1,6 @@
+framework module RCUniPush {
+  umbrella header "RCUniPush.h"
+
+  export *
+  module * { export * }
+}

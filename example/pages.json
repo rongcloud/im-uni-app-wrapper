@@ -11,6 +11,14 @@
 			"style": {
 				"navigationBarTitleText": "uni-app native 调用列表"
 			}
+		},
+		{
+			"path" : "pages/resultList/preview",
+			"style" : 
+			{
+				"navigationBarTitleText" : "",
+				"enablePullDownRefresh" : false
+			}
 		}
 	],
 	"globalStyle": {

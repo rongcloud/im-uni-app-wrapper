@@ -1,0 +1,110 @@
+<template>
+	<view>
+		<image :src="imageUrl" class="image" @error="imageError"></image>
+	</view>
+</template>
+
+<script>
+	import helper from '@/common/helper.js'
+	import { RCIMIWMessageType } from '@/uni_modules/RongCloud-IMWrapper-V2/js_sdk/RCIMDefines'
+
+	export default {
+		data() {
+			return {
+				imageUrl: ''
+			}
+		},
+		onLoad(options) {
+			console.log(options);
+			let imageData = JSON.parse(options.data);
+			console.log(imageData);
+			this.previewFile(imageData)
+		},
+		methods: {
+			previewFile(data) {
+				let file;
+				let messageType = data.messageType;
+				if (messageType) {
+					file = data.local;
+					
+					switch (messageType) {
+						case RCIMIWMessageType.voice:
+							this.openVoice(file);
+							break;
+						case RCIMIWMessageType.file:
+							break;
+						case RCIMIWMessageType.sight:
+							break;
+						case RCIMIWMessageType.image:
+							this.openImage(file);
+							break;
+						case RCIMIWMessageType.location:
+							this.openImage(data.thumbnailPath);
+							break;
+						default:
+							break;
+					}
+				} else {
+					file = data;
+					this.openImage(file);
+				}
+			},
+			async openImage(filePath) {
+				console.log(filePath);
+				let localPath = filePath;
+				if (uni.getSystemInfoSync().platform == 'ios') {
+						// localPath = await this.copyFile(filePath);
+						// nvue 页面可以这么访问
+						localPath = 'file://' + localPath;
+				}
+				console.log('preview localPath = ', localPath);
+				this.imageUrl = localPath;
+			},
+			async openVoice(filePath) {
+				console.log(filePath);
+				let localPath;
+				switch (uni.getSystemInfoSync().platform) {
+					case 'android':
+						localPath = filePath;
+						break;
+					case 'ios':
+						localPath = await this.copyFile(filePath);
+						break;
+					default:
+						console.log('运行在开发者工具上');
+						break;
+				}
+				console.log('localPath = ', localPath);
+				const innerAudioContext = uni.createInnerAudioContext();
+				innerAudioContext.autoplay = true;
+				innerAudioContext.volume = 1;
+				innerAudioContext.src = localPath;
+				innerAudioContext.onPlay(() => {
+				  console.log('开始播放');
+				});
+				innerAudioContext.onError((res) => {
+				  console.log(res.errMsg);
+				  console.log(res.errCode);
+				});
+			},
+			async copyFile(filePath) {
+				console.log(filePath)
+				console.log(helper.RCIMIWEngineInstance);
+				let res = await helper.RCIMIWEngineInstance.copyFileToUniDocPath(filePath);
+				console.log(res);
+				return res;
+			},
+
+			imageError(res) {
+				console.log(res);
+			},
+		}
+	}
+</script>
+
+<style>
+	.image {
+		width: 200rpx;
+		height: 300rpx;
+	}
+</style>

@@ -21,10 +21,8 @@
 					<view class="content" v-if="curCollapse === item.index">
 						<wg-json-view v-if="getShowDetailState(item.data)" ref="jsonView" class="uni-border" :collapsable="true"
 						            style="padding: 16upx;" :obj="item.data"></wg-json-view>
-						<!-- <view class="" v-if="getShowDetailState(item.data)">
-							{{item.data}}
-						</view> -->
 						<view v-else style="padding-left: 10px;">{{item.data}}</view>
+						<button v-if="isDisplayPreview(item.data)" @click="preview(item.data)">预览文件</button>
 					</view>
 				</uni-collapse-item>
 			</uni-collapse>
@@ -55,7 +53,28 @@
 			},
 			getShowDetailState(val) {
 				return isArray(val) || isObject(val) ? true : false
-			}
+			},
+			isDisplayPreview: (data) => {
+				return false;
+				// 调试使用
+				// return data.localPath||(data.message && (data.message.local||data.message.thumbnailPath));
+			},
+			preview: (data) => {
+				console.log(data);
+				let imageData;
+				if (data.localPath) {
+					imageData = data.localPath;
+				} else {
+					// imageData = {
+					// 	messageType: data.message.messageType,
+					// 	local: data.message.local
+					// };
+					imageData = data.message;
+				}
+				uni.navigateTo({
+					url: `./preview?data=${JSON.stringify(imageData)}`
+				});
+			},
 		}
 	}
 </script>

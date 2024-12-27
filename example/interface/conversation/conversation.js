@@ -17,6 +17,7 @@ import {
     syncConversationReadStatus,
     searchConversations,
     getMessageCount,
+		getUnreadConversations,
 } from '../../function/engine_func_auto.js';
 
 export const _getConversations = {
@@ -202,7 +203,7 @@ export const _searchConversations = {
         { key: 'channelId', value: '', type: 'string', name: '请输入频道Id', placeholder: '仅对超级群生效,其他类型无需填写' },
         {
             key: 'messageTypes', value: '', type: 'string', name: '请输入查询的消息类型:1:自定义消息；2:文本消息；3:语音；4:图片；' +
-                '5:文件；6:小视频；7:GIF图；8:撤回；9:引用；10:命令；11:命令通知', placeholder: '多个以英文 , 隔开 eg:1,2'
+                '5:文件；6:小视频；7:GIF图；8:撤回；9:引用；10:命令；11:命令通知；14:原生自定义消息；15:原生自定义媒体消息', placeholder: '多个以英文 , 隔开 eg:1,2'
         },
         { key: 'keyword', value: '', type: 'string', name: '请输入关键字', placeholder: '' },
     ],
@@ -217,4 +218,12 @@ export const _getMessageCount = {
         { key: 'channelId', value: '', type: 'string', name: '请输入频道Id', placeholder: '仅对超级群生效,其他类型无需填写' },
     ],
     action: getMessageCount,
+}
+
+export const _getUnreadConversations = {
+	name: "获取指定类型的含有未读消息的会话列表",
+	params: [
+		{ key: 'conversationTypes', value: '', type: 'string', name: '请输入会话类型:1:单聊,2:群聊,4:系统', placeholder: '多个以英文 , 隔开 eg:1,2' },
+	],
+	action: getUnreadConversations,
 }

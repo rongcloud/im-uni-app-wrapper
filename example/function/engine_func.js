@@ -28,7 +28,8 @@ export function create(arg) {
 		sightCompressHeight,
 		locationThumbnailQuality,
 		locationThumbnailWidth,
-		locationThumbnailHeight
+		locationThumbnailHeight,
+		areaCode,
 	} = arg;
 	if (appKey.length === 0) {
 		uni.showToast({
@@ -81,10 +82,18 @@ export function create(arg) {
 		pushOptions: config.pushOptions,
 		enablePush: true,
 	}
+	if (areaCode.length > 0) {
+		options.areaCode = parseInt(areaCode);
+	}
+
 	console.log('options---', options)
 	RCIMIWEngine.create(appKey, options).then((res) => {
 		console.log('初始化引擎res---', res)
 		helper.RCIMIWEngineInstance = res;
+		// 上报三方推送
+		// setTimeout(() => {
+		// 	helper.RCIMIWEngineInstance.registerPushToken(0, 'xxxx');
+		// }, 3000);
 	})
 
 	addSuccessResult({
@@ -128,6 +137,10 @@ export async function sendTextMessage(arg) {
 		content,
 		pushContent,
 		pushData,
+		pushTypeVIVO,
+		categoryVivo,
+		imageUrlHonor,
+		importanceHonor,
 		mentionedType,
 		userIdList,
 		mentionedContent,
@@ -202,42 +215,49 @@ export async function sendTextMessage(arg) {
 		};
 	}
 	//pushOptions
-	if (pushContent.length != 0 && pushData.length != 0) {
-		console.log('pushContent != null')
-		let jsonRCIMIWIOSPushOptions = {
-			threadId: 'threadId',
-			category: 'category',
-			apnsCollapseId: 'apnsCollapseId',
-			richMediaUri: 'richMediaUri'
-		};
-		let jsonRCIMIWAndroidPushOptions = {
-			notificationId: 'notificationId',
-			channelIdMi: 'channelIdMi',
-			channelIdHW: 'channelIdHW',
-			channelIdOPPO: 'channelIdOPPO',
-			pushTypeVIVO: 0,
-			collapseKeyFCM: 'collapseKeyFCM',
-			imageUrlFCM: 'imageUrlFCM',
-			importanceHW: 1,
-			imageUrlHW: 'imageUrlHW',
-			imageUrlMi: 'imageUrlMi',
-			channelIdFCM: 'channelIdFCM'
-		};
-		let pushOptions = {
-			pushContent: pushContent,
-			pushData: pushData,
-			disableNotification: true,
-			disablePushTitle: true,
-			pushTitle: '推送标题',
-			forceShowDetailContent: true,
-			templateId: 'templateId',
-			voIPPush: true,
-			iOSPushOptions: jsonRCIMIWIOSPushOptions,
-			androidPushOptions: jsonRCIMIWAndroidPushOptions
-		};
-		message.pushOptions = pushOptions;
-		console.log('message.pushOptions---', message.pushOptions);
+	let jsonRCIMIWIOSPushOptions = {
+		threadId: '',
+		category: '',
+		apnsCollapseId: '',
+		richMediaUri: ''
+	};
+	let jsonRCIMIWAndroidPushOptions = {
+		notificationId: '',
+		channelIdMi: '',
+		channelIdHW: '',
+		channelIdOPPO: '',
+		collapseKeyFCM: '',
+		imageUrlFCM: '',
+		importanceHW: 1,
+		imageUrlHW: '',
+		imageUrlMi: '',
+		channelIdFCM: ''
+	};
+	if (pushTypeVIVO) {
+		jsonRCIMIWAndroidPushOptions.pushTypeVIVO = parseInt(pushTypeVIVO);
 	}
+	if (categoryVivo) {
+		jsonRCIMIWAndroidPushOptions.categoryVivo = categoryVivo;
+	}
+
+	jsonRCIMIWAndroidPushOptions.imageUrlHonor = imageUrlHonor;	
+	if (importanceHonor) {
+		jsonRCIMIWAndroidPushOptions.importanceHonor = parseInt(importanceHonor);
+	}
+	let pushOptions = {
+		pushContent: pushContent,
+		pushData: pushData,
+		disableNotification: false,
+		disablePushTitle: false,
+		pushTitle: '',
+		forceShowDetailContent: false,
+		templateId: '',
+		voIPPush: false,
+		iOSPushOptions: jsonRCIMIWIOSPushOptions,
+		androidPushOptions: jsonRCIMIWAndroidPushOptions
+	};
+	message.pushOptions = pushOptions;
+	console.log('message.pushOptions---', message.pushOptions);
 	//expansion
 	if (keys.length != 0 && values.length != 0) {
 		keys = keys.split(',');
@@ -730,6 +750,131 @@ export async function sendCustomMessage(arg) {
 		title: 'sendCustomMessage',
 		code: code,
 	})
+}
+
+export async function sendNativeCustomMessage(arg) {
+	console.log('调用sendCustomMessage方法');
+	if (!helper.engineInited()) {
+		return
+	}
+	let { conversationType, targetId, channelId, messageIdentifier, fields, searchableWords } =
+	arg;
+
+	if (conversationType.length === 0) {
+		uni.showToast({
+			title: '会话类型为空',
+			icon: 'error'
+		});
+		console.log('conversationType为空')
+		return
+	}
+	if (targetId.length === 0) {
+		uni.showToast({
+			title: '会话Id为空',
+			icon: 'error'
+		});
+		console.log('targetId为空')
+		return
+	}
+	if (messageIdentifier.length === 0) {
+		uni.showToast({
+			title: '消息类型名为空',
+			icon: 'error'
+		});
+		console.log('messageIdentifier 为空')
+		return
+	}
+	if (fields.length === 0) {
+		uni.showToast({
+			title: 'fields 内容为空',
+			icon: 'error'
+		});
+		console.log('fields 为空')
+		return
+	}
+	fields = JSON.parse(fields)
+	
+	let searchableWordsArr = []; 
+	if (searchableWords.length > 0) {
+		searchableWordsArr = searchableWords.split(',');
+	}
+	let message = await helper.RCIMIWEngineInstance.createNativeCustomMessage(parseInt(conversationType), targetId,
+		channelId, messageIdentifier, fields);
+	message.searchableWords = searchableWordsArr;
+	
+	let code = await sendMessage(message);
+
+	addPrimaryResult({
+		title: 'sendNativeCustomMessage',
+		code: code,
+	})
+}
+
+export async function sendNativeCustomMediaMessage(arg) {
+	console.log('调用sendCustomMessage方法');
+	if (!helper.engineInited()) {
+		return
+	}
+	let { conversationType, targetId, channelId, messageIdentifier, fields, searchableWords } =
+	arg;
+
+	if (conversationType.length === 0) {
+		uni.showToast({
+			title: '会话类型为空',
+			icon: 'error'
+		});
+		console.log('conversationType为空')
+		return
+	}
+	if (targetId.length === 0) {
+		uni.showToast({
+			title: '会话Id为空',
+			icon: 'error'
+		});
+		console.log('targetId为空')
+		return
+	}
+	if (messageIdentifier.length === 0) {
+		uni.showToast({
+			title: '消息类型名为空',
+			icon: 'error'
+		});
+		console.log('messageIdentifier 为空')
+		return
+	}
+	if (fields.length === 0) {
+		uni.showToast({
+			title: 'json 内容为空',
+			icon: 'error'
+		});
+		console.log('fields 为空')
+		return
+	}
+	fields = JSON.parse(fields)
+	
+	let searchableWordsArr = []; 
+	if (searchableWords.length > 0) {
+		searchableWordsArr = searchableWords.split(',');
+	}
+	
+	uni.chooseImage({
+			count: 1,
+			sourceType: ['album'],
+			success: async (res) => {
+				console.log('chooseImage-res---', res)
+				if (res.tempFilePaths.length < 0) return
+				let filePath = 'file:///' + plus.io.convertLocalFileSystemURL(res.tempFilePaths[0])
+				let message = await helper.RCIMIWEngineInstance.createNativeCustomMediaMessage(parseInt(conversationType), targetId,
+					channelId, messageIdentifier, filePath, fields);
+				message.searchableWords = searchableWordsArr;
+				
+				let code = await sendMediaMessage(message);
+				addPrimaryResult({
+					title: 'sendNativeCustomMediaMessage',
+					code: code,
+				})
+			}
+		})
 }
 
 export async function cancelSendingMediaMessage(arg) {
@@ -1462,4 +1607,15 @@ async function getMessageById(messageId) {
 			reject(res);
 		}
 	});
+}
+
+export async function registerPushToken(arg) {
+	let { pushType, pushToken } = arg;
+	let code = await helper.RCIMIWEngineInstance.registerPushToken(parseInt(pushType), pushToken);
+	addSuccessResult({
+		title: 'registerPushToken',
+		data: {
+			'result': code
+		}
+	})
 }

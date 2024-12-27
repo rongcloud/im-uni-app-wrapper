@@ -1,3 +1,49 @@
+export declare enum RCIMIWPushType {
+    /**
+     * iOS
+     */
+    iOS = 0,
+    /**
+     * 未知类型
+     */
+    unknown = 1,
+    /**
+     * 融云自己的，不再使用
+     */
+    rong = 2,
+    /**
+     * 华为推送
+     */
+    huawei = 3,
+    /**
+     * 小米推送
+     */
+    xiaomi = 4,
+    /**
+     * FCM 推送
+     */
+    googleFCM = 5,
+    /**
+     * GCM 推送
+     */
+    googleGCM = 6,
+    /**
+     * 魅族推送
+     */
+    meizu = 7,
+    /**
+     * VIVO 推送
+     */
+    vivo = 8,
+    /**
+     * OPPO 推送
+     */
+    oppo = 9,
+    /**
+     * 华为荣耀推送
+     */
+    honor = 10
+}
 export interface RCIMIWAndroidPushOptions {
     /**
      * Android 平台 Push 唯一标识。
@@ -53,6 +99,16 @@ export interface RCIMIWAndroidPushOptions {
      * 如果您未在请求中发送此频道 ID，或者如果应用尚未创建提供的频道 ID，则 FCM 使用应用清单中指定的频道 ID。
      */
     channelIdFCM?: string;
+    categoryVivo?: string;
+    /**
+     * 荣耀推送消息级别
+     */
+    importanceHonor?: RCIMIWImportanceHonor;
+    /**
+     * 荣耀通知栏消息右侧大图标 URL，如果不设置，则不展示通知栏右侧图标。
+     * URL使用的协议必须是HTTPS协议，取值样例：https://example.com/image.png。图标文件须小于 512KB，图标建议规格大小：40dp x 40dp，弧角大小为 8dp，超出建议规格大小的图标会存在图片压缩或显示不全的情况。
+     */
+    imageUrlHonor?: string;
 }
 export interface RCIMIWMessagePushOptions {
     /**
@@ -195,6 +251,10 @@ export interface RCIMIWEngineOptions {
      */
     statisticServer?: string;
     /**
+     * 数据中心区域码
+     */
+    areaCode?: RCIMIWAreaCode;
+    /**
      * 设置断线重连时是否踢出重连设备。
      * 用户没有开通多设备登录功能的前提下，同一个账号在一台新设备上登录的时候，会把这个账号在之前登录的设备上踢出。
      */
@@ -302,6 +362,22 @@ export interface RCIMIWCustomMessage extends RCIMIWMessage {
         [propName: string]: string;
     };
 }
+export interface RCIMIWNativeCustomMessage extends RCIMIWMessage {
+    /**
+     * 自定义消息的内容
+     */
+    fields?: {
+        [propName: string]: Object;
+    };
+    /**
+     * 自定义消息的搜索关键字
+     */
+    searchableWords?: Array<string>;
+    /**
+     * 自定义消息的唯一标识
+     */
+    messageIdentifier?: string;
+}
 export interface RCIMIWMessage {
     /**
      * 会话类型
@@ -322,7 +398,7 @@ export interface RCIMIWMessage {
      */
     channelId?: string;
     /**
-     * 本地存储的消息的唯一值（数据库索引唯一值）
+     * 本地数据库中存储的消息的唯一 ID 值。发送新消息时无需指定该 ID，否则会导致消息入库失败。在失败重发消息时，可以填入已入库的消息的 ID，请确保使用上一次发送失败的消息实例。
      * @return
      */
     messageId?: number;
@@ -388,6 +464,22 @@ export interface RCIMIWMessage {
         [propName: string]: string;
     };
 }
+export interface RCIMIWNativeCustomMediaMessage extends RCIMIWMediaMessage {
+    /**
+     * 自定义消息的内容
+     */
+    fields?: {
+        [propName: string]: Object;
+    };
+    /**
+     * 自定义消息的搜索关键字
+     */
+    searchableWords?: Array<string>;
+    /**
+     * 自定义消息的唯一标识
+     */
+    messageIdentifier?: string;
+}
 export interface RCIMIWImageMessage extends RCIMIWMediaMessage {
     /**
      * 图片的缩略图数据
@@ -422,7 +514,7 @@ export interface RCIMIWRecallNotificationMessage extends RCIMIWMessage {
      */
     deleted?: boolean;
     /**
-     * 撤回的时间（毫秒）
+     * 被撤回的原始消息的发送时间（毫秒）
      */
     recallTime?: number;
     /**
@@ -705,6 +797,11 @@ export interface RCIMIWConversation {
      * @return
      */
     firstUnreadMsgSendTime?: number;
+    /**
+     * 获取会话最后的操作时间
+     * @return
+     */
+    operationTime?: number;
 }
 export interface RCIMIWPushOptions {
     idMI?: string;
@@ -716,6 +813,7 @@ export interface RCIMIWPushOptions {
     enableHWPush?: boolean;
     enableFCM?: boolean;
     enableVIVOPush?: boolean;
+    enableHonorPush?: boolean;
 }
 export declare enum RCIMIWImportanceHW {
     /**
@@ -740,6 +838,25 @@ export declare enum RCIMIWMessageOperationPolicy {
      * 本地和远端
      */
     localRemote = 2
+}
+export declare enum RCIMIWNativeCustomMessagePersistentFlag {
+    /**
+     * 不存储，不计数
+     */
+    none = 0,
+    /**
+     * 在本地只存储，但不计入未读数
+     */
+    persisted = 1,
+    /**
+     * 在本地进行存储并计入未读数
+     */
+    counted = 2,
+    /**
+ * 在本地不存储，不计入未读数，并且如果对方不在线，服务器会直接丢弃该消息，对方如果之后再上线也不会再收到此消息。
+    一般用于发送输入状态之类的消息。
+ */
+    status = 3
 }
 export declare enum RCIMIWVIVOPushType {
     /**
@@ -927,7 +1044,15 @@ export declare enum RCIMIWMessageType {
     /**
      * 用户自定义消息
      */
-    userCustom = 13
+    userCustom = 13,
+    /**
+     * 原生自定义普通消息
+     */
+    nativeCustom = 14,
+    /**
+     * 原生自定义媒体消息
+     */
+    nativeCustomMedia = 15
 }
 export declare enum RCIMIWMessageBlockType {
     /**
@@ -1038,6 +1163,28 @@ export declare enum RCIMIWMentionedType {
      */
     part = 1
 }
+export declare enum RCIMIWAreaCode {
+    /**
+     * 北京数据中心，默认值
+     */
+    bj = 0,
+    /**
+     * 新加坡数据中心
+     */
+    sg = 1,
+    /**
+     * 北美数据中心
+     */
+    na = 2,
+    /**
+     * 新加坡 B 企业合作数据中心
+     */
+    sgB = 3,
+    /**
+     * 沙特数据中心
+     */
+    sa = 4
+}
 export declare enum RCIMIWChatRoomEntriesOperationType {
     /**
      * 更新操作
@@ -1087,6 +1234,16 @@ export declare enum RCIMIWBlacklistStatus {
      * 不在黑名单
      */
     notInBlacklist = 2
+}
+export declare enum RCIMIWImportanceHonor {
+    /**
+     * 表示消息为服务与通讯类。消息提醒方式为锁屏+铃声+震动。
+     */
+    normal = 0,
+    /**
+     * 表示消息为资讯营销类。消息提醒方式为静默通知，仅在下拉通知栏展示。
+     */
+    low = 1
 }
 export declare enum RCIMIWConnectionStatus {
     /**
@@ -1204,6 +1361,8 @@ export interface IRCIMIWObjectCallback<T> {
     }) => void;
 }
 export interface IRCIMIWGetConversationsCallback extends IRCIMIWObjectCallback<Array<RCIMIWConversation>> {
+}
+export interface IRCIMIWGetUnreadConversationsCallback extends IRCIMIWObjectCallback<Array<RCIMIWConversation>> {
 }
 export interface IRCIMIWRemoveConversationCallback {
     onConversationRemoved: (res: {
@@ -1559,6 +1718,19 @@ export interface OnConversationTopStatusSyncedResult {
     targetId: string;
     channelId: string;
     top: boolean;
+}
+/**
+ * 会话状态免打扰多端同步监听
+ * @param type      会话类型
+ * @param targetId  会话 ID
+ * @param channelId 频道 ID，仅支持超级群使用，其他会话类型传 null 即可。
+ * @param level     当前会话通知的类型
+ */
+export interface OnConversationNotificationLevelSyncedResult {
+    type: RCIMIWConversationType;
+    targetId: string;
+    channelId: string;
+    level: RCIMIWPushNotificationLevel;
 }
 /**
  * 撤回消息监听器

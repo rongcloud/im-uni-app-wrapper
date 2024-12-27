@@ -1,8 +1,9 @@
 const RCUniIM = uni.requireNativePlugin('RongCloud-IM-V2-RCUniIMV2');
 
-import {
-    RCIMIWEngineOptions,
-} from './RCIMDefines';
+import { RCIMIWPushType, RCIMIWEngineOptions, RCIMIWErrorCode } from './RCIMDefines';
+
+import * as RCIMLog from './utils/RCIMLog';
+import { AssertRules, validate } from './utils/assert';
 
 import {
     IRCIMIWAddChatRoomEntriesCallback,
@@ -55,6 +56,7 @@ import {
     IRCIMIWGetUltraGroupDefaultNotificationLevelCallback,
     IRCIMIWGetUltraGroupUnreadCountCallback,
     IRCIMIWGetUltraGroupUnreadMentionedCountCallback,
+    IRCIMIWGetUnreadConversationsCallback,
     IRCIMIWGetUnreadCountByConversationTypesCallback,
     IRCIMIWGetUnreadCountCallback,
     IRCIMIWGetUnreadMentionedCountCallback,
@@ -112,6 +114,7 @@ import {
     OnConversationLoadedResult,
     OnConversationNotificationLevelChangedResult,
     OnConversationNotificationLevelLoadedResult,
+    OnConversationNotificationLevelSyncedResult,
     OnConversationReadStatusSyncMessageReceivedResult,
     OnConversationReadStatusSyncedResult,
     OnConversationRemovedResult,
@@ -223,6 +226,9 @@ import {
     RCIMIWMessage,
     RCIMIWMessageOperationPolicy,
     RCIMIWMessageType,
+    RCIMIWNativeCustomMediaMessage,
+    RCIMIWNativeCustomMessage,
+    RCIMIWNativeCustomMessagePersistentFlag,
     RCIMIWPushNotificationLevel,
     RCIMIWPushNotificationQuietHoursLevel,
     RCIMIWReceivedStatus,
@@ -238,35 +244,50 @@ import {
     RCIMIWTypingStatus,
     RCIMIWUltraGroupTypingStatus,
     RCIMIWUltraGroupTypingStatusInfo,
-    RCIMIWVoiceMessage
+    RCIMIWVoiceMessage,
 } from './RCIMDefines';
 
-let instance: RCIMIWEngine|null;
+const paramErrorPromise = Promise.resolve(RCIMIWErrorCode.paramError);
+
+let instance: RCIMIWEngine | null;
 
 export default class RCIMIWEngine {
-
     static _invokeMethod(name: string, params?: object): any {
-        console.log(`invokeMethod methodName: ${name}, params:${JSON.stringify(params)}`);
-        return new Promise((resolve, _) => { RCUniIM.invokeMethod({ name, params }, (res: any) => { resolve(res); }); });
+        RCIMLog.log(RCIMIWLogLevel.info, `invokeMethod methodName: ${name}, params:${JSON.stringify(params)}`);
+        return new Promise((resolve, _) => {
+            RCUniIM.invokeMethod({ name, params }, (res: any) => {
+                resolve(res);
+            });
+        });
     }
 
     _invokeMethod(name: string, callback: any, params?: object): any {
-        console.log(`invokeMethod methodName: ${name}, params:${JSON.stringify(params)}`);
+        RCIMLog.log(RCIMIWLogLevel.info, `invokeMethod methodName: ${name}, params:${JSON.stringify(params)}`);
         return new Promise((resolve, _) => {
             if (callback) {
-                RCUniIM.invokeMethod({ name, params }, (res: any) => { resolve(res); }, callback);
+                RCUniIM.invokeMethod(
+                    { name, params },
+                    (res: any) => {
+                        resolve(res);
+                    },
+                    callback
+                );
             } else {
-                RCUniIM.invokeMethod({ name, params }, (res: any) => { resolve(res); });
+                RCUniIM.invokeMethod({ name, params }, (res: any) => {
+                    resolve(res);
+                });
             }
         });
     }
 
     private _setListener(eventName: string, callback?: any): void {
-        console.log(`setListener eventName: ${eventName}, callback:${callback != null}`);
+        RCIMLog.log(RCIMIWLogLevel.info, `setListener eventName: ${eventName}, callback:${callback != null}`);
         // 因为单个事件名只支持设置一个监听，所以要先移除已有的监听。
         RCUniIM.removeAllEventListeners(eventName);
         if (callback) {
-            let listener = (res: { module: string, type: string, data: any }) => { callback(res.data); };
+            let listener = (res: { module: string; type: string; data: any }) => {
+                callback(res.data);
+            };
             RCUniIM.addEventListener(eventName, listener);
         }
     }
@@ -277,16 +298,16 @@ export default class RCIMIWEngine {
      * @param options 全局配置项
      * @returns 创建的 IM 对象
      */
-    static async create(appKey: string, options: RCIMIWEngineOptions = {}): Promise<RCIMIWEngine|null> {
+    static async create(appKey: string, options: RCIMIWEngineOptions = {}): Promise<RCIMIWEngine | null> {
         if (instance) {
-            return new Promise(resolve => resolve(instance));
+            return new Promise((resolve) => resolve(instance));
         }
         let code = await RCIMIWEngine._invokeMethod('create', { appKey, options });
         if (code === 0) {
             instance = new RCIMIWEngine();
             return instance;
         }
-        return new Promise(resolve => resolve(null));
+        return new Promise((resolve) => resolve(null));
     }
 
     /**
@@ -298,6 +319,29 @@ export default class RCIMIWEngine {
             instance = null;
         }
         return code;
+    }
+
+    /**
+     * 注册推送 token 给融云，用于不集成融云推送 SDK 但需使用融云消息推送能力。
+     * 如果是 iOS 平台时，会忽略传入的 pushType 值，只使用 pushToken 参数。
+     * 该方法需要在 IM 初始化后 3 秒再调用。
+     * @param pushType 推送厂商类型
+     * @param pushToken 推送 token （厂商接口 或 三方推送 SDK 提供的）
+     * @returns 当次接口操作的状态码。0 代表调用成功 具体结果需要实现接口回调，非 0 代表当前接口调用操作失败，不会触发接口回调，详细错误参考错误码
+     */
+    registerPushToken(pushType: RCIMIWPushType, pushToken: string): Promise<number> {
+        if (
+            !validate('pushType', pushType, AssertRules.NUMBER, true) ||
+            !validate('pushToken', pushToken, AssertRules.STRING, true)
+        ) {
+            return paramErrorPromise;
+        }
+        const Platform = uni.getSystemInfoSync().platform;
+        if (Platform == 'android' && pushType == RCIMIWPushType.iOS) {
+            RCIMLog.log(RCIMIWLogLevel.error, 'pushType iOS only support iOS platform');
+            return paramErrorPromise;
+        }
+        return this._invokeMethod('registerPushToken', null, { pushType, pushToken });
     }
 
     // /**
@@ -317,17 +361,66 @@ export default class RCIMIWEngine {
     // }
 
     /**
+     * 注册原生自定义普通消息
+     * @param messageIdentifier 消息的唯一标识
+     * @param persistentFlag 消息的存储策略
+     * @return 当次接口操作的状态码。0 代表调用成功，非 0 代表当前接口调用操作失败，详细错误参考错误码
+     */
+    registerNativeCustomMessage(
+        messageIdentifier: string,
+        persistentFlag: RCIMIWNativeCustomMessagePersistentFlag
+    ): Promise<number> {
+        if (
+            !validate('messageIdentifier', messageIdentifier, AssertRules.STRING, true) ||
+            !validate('persistentFlag', persistentFlag, AssertRules.NUMBER, true)
+        ) {
+            return paramErrorPromise;
+        }
+        let resultCallback;
+        return this._invokeMethod('registerNativeCustomMessage', resultCallback, { messageIdentifier, persistentFlag });
+    }
+
+    /**
+     * 注册原生自定义媒体消息
+     * @param messageIdentifier 消息的唯一标识
+     * @param persistentFlag 消息的存储策略
+     * @return 当次接口操作的状态码。0 代表调用成功，非 0 代表当前接口调用操作失败，详细错误参考错误码
+     */
+    registerNativeCustomMediaMessage(
+        messageIdentifier: string,
+        persistentFlag: RCIMIWNativeCustomMessagePersistentFlag
+    ): Promise<number> {
+        if (
+            !validate('messageIdentifier', messageIdentifier, AssertRules.STRING, true) ||
+            !validate('persistentFlag', persistentFlag, AssertRules.NUMBER, true)
+        ) {
+            return paramErrorPromise;
+        }
+        let resultCallback;
+        return this._invokeMethod('registerNativeCustomMediaMessage', resultCallback, {
+            messageIdentifier,
+            persistentFlag,
+        });
+    }
+
+    /**
      * 连接融云服务器，在整个应用程序全局，只需要调用一次。调用此接口返回非业务错误码时，SDK 会启动重连机制进行重连；如果仍没有连接成功，会在设备网络状态变化时再次进行重连。
      * @param token    调用 server api 获取到的 token
      * @param timeout  连接超时时间，单位：秒。
      * timeLimit <= 0，则 IM 将一直连接，直到连接成功或者无法连接（如 token 非法）
      * timeLimit > 0，则 IM 将最多连接 timeLimit 秒
      * 如果在 timeLimit 秒内连接成功，后面再发生了网络变化或前后台切换，SDK 会自动重连； 如果在 timeLimit 秒无法连接成功则不再进行重连，通过 listener 告知连接超时，您需要再自行调用 connect 接口
-     * @param callback 链接事件回调。SDK 从 5.3.1 版本开始支持 callback 方式回调。从 5.4.0 版本废弃该接口的其他回调方式。如果传入了 callback 参数，仅触发 callback 回调。
+     * @param callback 链接事件回调。SDK 从 5.3.1 版本开始支持 callback 方式回调。从 5.4.0 版本废弃该接口的其他回调方式，预计将在 6.x 版本删除此其他回调方式。如果传入了 callback 参数，仅触发 callback 回调。
      * @return 当次接口操作的状态码。0 代表调用成功 具体结果需要实现接口回调，非 0 代表当前接口调用操作失败，不会触发接口回调，详细错误参考错误码
      * @listener 接口回调可以监听 [onConnected]
      */
     connect(token: string, timeout: number, callback: RCIMIWConnectCallback): Promise<number> {
+        if (
+            !validate('token', token, AssertRules.STRING, true) ||
+            !validate('timeout', timeout, AssertRules.NUMBER, true)
+        ) {
+            return paramErrorPromise;
+        }
         let resultCallback;
         if (callback) {
             resultCallback = (res: any) => {
@@ -339,7 +432,7 @@ export default class RCIMIWEngine {
                     let { code, userId } = res;
                     callback.onConnected?.({ code, userId });
                 }
-            }
+            };
         }
         return this._invokeMethod('connect', resultCallback, { token, timeout });
     }
@@ -351,6 +444,9 @@ export default class RCIMIWEngine {
      * @return 当次接口操作的状态码。0 代表调用成功 具体结果需要实现接口回调，非 0 代表当前接口调用操作失败，不会触发接口回调，详细错误参考错误码
      */
     disconnect(receivePush: boolean): Promise<number> {
+        if (!validate('receivePush', receivePush, AssertRules.BOOLEAN, true)) {
+            return paramErrorPromise;
+        }
         let resultCallback;
         return this._invokeMethod('disconnect', resultCallback, { receivePush });
     }
@@ -363,7 +459,20 @@ export default class RCIMIWEngine {
      * @param text      文本内容
      * @return 文本消息实体
      */
-    createTextMessage(type: RCIMIWConversationType, targetId: string, channelId: string, text: string): Promise<RCIMIWTextMessage> {
+    createTextMessage(
+        type: RCIMIWConversationType,
+        targetId: string,
+        channelId: string,
+        text: string
+    ): Promise<RCIMIWTextMessage | number> {
+        if (
+            !validate('type', type, AssertRules.NUMBER, true) ||
+            !validate('targetId', targetId, AssertRules.STRING, true) ||
+            !validate('channelId', channelId, AssertRules.ONLY_STRING, false) ||
+            !validate('text', text, AssertRules.STRING, true)
+        ) {
+            return paramErrorPromise;
+        }
         let resultCallback;
         return this._invokeMethod('createTextMessage', resultCallback, { type, targetId, channelId, text });
     }
@@ -376,7 +485,20 @@ export default class RCIMIWEngine {
      * @param path      图片消息的本地路径，必须为有效路径
      * @return 图片消息实体
      */
-    createImageMessage(type: RCIMIWConversationType, targetId: string, channelId: string, path: string): Promise<RCIMIWImageMessage> {
+    createImageMessage(
+        type: RCIMIWConversationType,
+        targetId: string,
+        channelId: string,
+        path: string
+    ): Promise<RCIMIWImageMessage | number> {
+        if (
+            !validate('type', type, AssertRules.NUMBER, true) ||
+            !validate('targetId', targetId, AssertRules.STRING, true) ||
+            !validate('channelId', channelId, AssertRules.ONLY_STRING, false) ||
+            !validate('path', path, AssertRules.STRING, true)
+        ) {
+            return paramErrorPromise;
+        }
         let resultCallback;
         return this._invokeMethod('createImageMessage', resultCallback, { type, targetId, channelId, path });
     }
@@ -389,7 +511,20 @@ export default class RCIMIWEngine {
      * @param path      文件消息的本地路径，必须为有效路径
      * @return 文件消息实体
      */
-    createFileMessage(type: RCIMIWConversationType, targetId: string, channelId: string, path: string): Promise<RCIMIWFileMessage> {
+    createFileMessage(
+        type: RCIMIWConversationType,
+        targetId: string,
+        channelId: string,
+        path: string
+    ): Promise<RCIMIWFileMessage | number> {
+        if (
+            !validate('type', type, AssertRules.NUMBER, true) ||
+            !validate('targetId', targetId, AssertRules.STRING, true) ||
+            !validate('channelId', channelId, AssertRules.ONLY_STRING, false) ||
+            !validate('path', path, AssertRules.STRING, true)
+        ) {
+            return paramErrorPromise;
+        }
         let resultCallback;
         return this._invokeMethod('createFileMessage', resultCallback, { type, targetId, channelId, path });
     }
@@ -403,7 +538,22 @@ export default class RCIMIWEngine {
      * @param duration  小视频消息的视频时长
      * @return 视频消息实体
      */
-    createSightMessage(type: RCIMIWConversationType, targetId: string, channelId: string, path: string, duration: number): Promise<RCIMIWSightMessage> {
+    createSightMessage(
+        type: RCIMIWConversationType,
+        targetId: string,
+        channelId: string,
+        path: string,
+        duration: number
+    ): Promise<RCIMIWSightMessage | number> {
+        if (
+            !validate('type', type, AssertRules.NUMBER, true) ||
+            !validate('targetId', targetId, AssertRules.STRING, true) ||
+            !validate('channelId', channelId, AssertRules.ONLY_STRING, false) ||
+            !validate('path', path, AssertRules.STRING, true) ||
+            !validate('duration', duration, AssertRules.NUMBER, true)
+        ) {
+            return paramErrorPromise;
+        }
         let resultCallback;
         return this._invokeMethod('createSightMessage', resultCallback, { type, targetId, channelId, path, duration });
     }
@@ -417,7 +567,22 @@ export default class RCIMIWEngine {
      * @param duration  语音消息的消息时长
      * @return 语音消息的实体
      */
-    createVoiceMessage(type: RCIMIWConversationType, targetId: string, channelId: string, path: string, duration: number): Promise<RCIMIWVoiceMessage> {
+    createVoiceMessage(
+        type: RCIMIWConversationType,
+        targetId: string,
+        channelId: string,
+        path: string,
+        duration: number
+    ): Promise<RCIMIWVoiceMessage | number> {
+        if (
+            !validate('type', type, AssertRules.NUMBER, true) ||
+            !validate('targetId', targetId, AssertRules.STRING, true) ||
+            !validate('channelId', channelId, AssertRules.ONLY_STRING, false) ||
+            !validate('path', path, AssertRules.STRING, true) ||
+            !validate('duration', duration, AssertRules.NUMBER, true)
+        ) {
+            return paramErrorPromise;
+        }
         let resultCallback;
         return this._invokeMethod('createVoiceMessage', resultCallback, { type, targetId, channelId, path, duration });
     }
@@ -431,9 +596,30 @@ export default class RCIMIWEngine {
      * @param text             引用的文本内容
      * @return 引用消息实体
      */
-    createReferenceMessage(type: RCIMIWConversationType, targetId: string, channelId: string, referenceMessage: RCIMIWMessage, text: string): Promise<RCIMIWReferenceMessage> {
+    createReferenceMessage(
+        type: RCIMIWConversationType,
+        targetId: string,
+        channelId: string,
+        referenceMessage: RCIMIWMessage,
+        text: string
+    ): Promise<RCIMIWReferenceMessage | number> {
+        if (
+            !validate('type', type, AssertRules.NUMBER, true) ||
+            !validate('targetId', targetId, AssertRules.STRING, true) ||
+            !validate('channelId', channelId, AssertRules.ONLY_STRING, false) ||
+            !validate('referenceMessage', referenceMessage, AssertRules.OBJECT, true) ||
+            !validate('text', text, AssertRules.STRING, true)
+        ) {
+            return paramErrorPromise;
+        }
         let resultCallback;
-        return this._invokeMethod('createReferenceMessage', resultCallback, { type, targetId, channelId, referenceMessage, text });
+        return this._invokeMethod('createReferenceMessage', resultCallback, {
+            type,
+            targetId,
+            channelId,
+            referenceMessage,
+            text,
+        });
     }
 
     /**
@@ -444,7 +630,20 @@ export default class RCIMIWEngine {
      * @param path      GIF 消息的本地路径
      * @return GIF 消息实体
      */
-    createGIFMessage(type: RCIMIWConversationType, targetId: string, channelId: string, path: string): Promise<RCIMIWGIFMessage> {
+    createGIFMessage(
+        type: RCIMIWConversationType,
+        targetId: string,
+        channelId: string,
+        path: string
+    ): Promise<RCIMIWGIFMessage | number> {
+        if (
+            !validate('type', type, AssertRules.NUMBER, true) ||
+            !validate('targetId', targetId, AssertRules.STRING, true) ||
+            !validate('channelId', channelId, AssertRules.ONLY_STRING, false) ||
+            !validate('path', path, AssertRules.STRING, true)
+        ) {
+            return paramErrorPromise;
+        }
         let resultCallback;
         return this._invokeMethod('createGIFMessage', resultCallback, { type, targetId, channelId, path });
     }
@@ -459,9 +658,32 @@ export default class RCIMIWEngine {
      * @param fields            消息的内容键值对
      * @return 自定义消息实体
      */
-    createCustomMessage(type: RCIMIWConversationType, targetId: string, channelId: string, policy: RCIMIWCustomMessagePolicy, messageIdentifier: string, fields: { [propName: string]: string }): Promise<RCIMIWCustomMessage> {
+    createCustomMessage(
+        type: RCIMIWConversationType,
+        targetId: string,
+        channelId: string,
+        policy: RCIMIWCustomMessagePolicy,
+        messageIdentifier: string,
+        fields: { [propName: string]: string }
+    ): Promise<RCIMIWCustomMessage | number> {
+        if (
+            !validate('type', type, AssertRules.NUMBER, true) ||
+            !validate('targetId', targetId, AssertRules.STRING, true) ||
+            !validate('channelId', channelId, AssertRules.ONLY_STRING, false) ||
+            !validate('policy', policy, AssertRules.NUMBER, true) ||
+            !validate('messageIdentifier', messageIdentifier, AssertRules.STRING, true)
+        ) {
+            return paramErrorPromise;
+        }
         let resultCallback;
-        return this._invokeMethod('createCustomMessage', resultCallback, { type, targetId, channelId, policy, messageIdentifier, fields });
+        return this._invokeMethod('createCustomMessage', resultCallback, {
+            type,
+            targetId,
+            channelId,
+            policy,
+            messageIdentifier,
+            fields,
+        });
     }
 
     /**
@@ -475,19 +697,121 @@ export default class RCIMIWEngine {
      * @param thumbnailPath 缩略图本地路径，必须为有效路径
      * @return 位置消息实体
      */
-    createLocationMessage(type: RCIMIWConversationType, targetId: string, channelId: string, longitude: number, latitude: number, poiName: string, thumbnailPath: string): Promise<RCIMIWLocationMessage> {
+    createLocationMessage(
+        type: RCIMIWConversationType,
+        targetId: string,
+        channelId: string,
+        longitude: number,
+        latitude: number,
+        poiName: string,
+        thumbnailPath: string
+    ): Promise<RCIMIWLocationMessage | number> {
+        if (
+            !validate('type', type, AssertRules.NUMBER, true) ||
+            !validate('targetId', targetId, AssertRules.STRING, true) ||
+            !validate('channelId', channelId, AssertRules.ONLY_STRING, false) ||
+            !validate('longitude', longitude, AssertRules.NUMBER, true) ||
+            !validate('latitude', latitude, AssertRules.NUMBER, true) ||
+            !validate('poiName', poiName, AssertRules.STRING, true) ||
+            !validate('thumbnailPath', thumbnailPath, AssertRules.STRING, true)
+        ) {
+            return paramErrorPromise;
+        }
         let resultCallback;
-        return this._invokeMethod('createLocationMessage', resultCallback, { type, targetId, channelId, longitude, latitude, poiName, thumbnailPath });
+        return this._invokeMethod('createLocationMessage', resultCallback, {
+            type,
+            targetId,
+            channelId,
+            longitude,
+            latitude,
+            poiName,
+            thumbnailPath,
+        });
+    }
+
+    /**
+     * 构建原生自定义普通消息
+     * @param type 会话类型
+     * @param targetId 会话 ID
+     * @param channelId 频道 ID，仅支持超级群使用，其他会话类型传 null 即可。
+     * @param messageIdentifier 消息的标识符，需唯一
+     * @param fields 消息的内容键值对
+     * @return 原生自定义普通消息
+     */
+    createNativeCustomMessage(
+        type: RCIMIWConversationType,
+        targetId: string,
+        channelId: string,
+        messageIdentifier: string,
+        fields: { [propName: string]: Object }
+    ): Promise<RCIMIWNativeCustomMessage | number> {
+        if (
+            !validate('type', type, AssertRules.NUMBER, true) ||
+            !validate('targetId', targetId, AssertRules.STRING, true) ||
+            !validate('channelId', channelId, AssertRules.ONLY_STRING, false) ||
+            !validate('messageIdentifier', messageIdentifier, AssertRules.STRING, true)
+        ) {
+            return paramErrorPromise;
+        }
+        let resultCallback;
+        return this._invokeMethod('createNativeCustomMessage', resultCallback, {
+            type,
+            targetId,
+            channelId,
+            messageIdentifier,
+            fields,
+        });
+    }
+
+    /**
+     * 构建原生自定义媒体消息
+     * @param type 会话类型
+     * @param targetId 会话 ID
+     * @param channelId 频道 ID，仅支持超级群使用，其他会话类型传 null 即可。
+     * @param messageIdentifier 消息的标识符，需唯一
+     * @param path 媒体文件的本地路径，必须为有效路径
+     * @param fields 消息的内容键值对
+     * @return 原生自定义媒体消息
+     */
+    createNativeCustomMediaMessage(
+        type: RCIMIWConversationType,
+        targetId: string,
+        channelId: string,
+        messageIdentifier: string,
+        path: string,
+        fields: { [propName: string]: Object }
+    ): Promise<RCIMIWNativeCustomMediaMessage | number> {
+        if (
+            !validate('type', type, AssertRules.NUMBER, true) ||
+            !validate('targetId', targetId, AssertRules.STRING, true) ||
+            !validate('channelId', channelId, AssertRules.ONLY_STRING, false) ||
+            !validate('messageIdentifier', messageIdentifier, AssertRules.STRING, true) ||
+            !validate('path', path, AssertRules.STRING, true)
+        ) {
+            return paramErrorPromise;
+        }
+        let resultCallback;
+        return this._invokeMethod('createNativeCustomMediaMessage', resultCallback, {
+            type,
+            targetId,
+            channelId,
+            messageIdentifier,
+            path,
+            fields,
+        });
     }
 
     /**
      * 发送普通消息
      * @param message  发送的消息实体
-     * @param callback 发送消息的事件回调。SDK 从 5.3.1 版本开始支持 callback 方式回调。从 5.4.0 版本废弃该接口的其他回调方式。如果传入了 callback 参数，仅触发 callback 回调。
+     * @param callback 发送消息的事件回调。SDK 从 5.3.1 版本开始支持 callback 方式回调。从 5.4.0 版本废弃该接口的其他回调方式，预计将在 6.x 版本删除此其他回调方式。如果传入了 callback 参数，仅触发 callback 回调。
      * @return 当次接口操作的状态码。0 代表调用成功 具体结果需要实现接口回调，非 0 代表当前接口调用操作失败，不会触发接口回调，详细错误参考错误码
      * @listener 接口回调可以监听 [onMessageAttached],[onMessageSent]
      */
     sendMessage(message: RCIMIWMessage, callback: RCIMIWSendMessageCallback): Promise<number> {
+        if (!validate('message', message, AssertRules.OBJECT, true)) {
+            return paramErrorPromise;
+        }
         let resultCallback;
         if (callback) {
             resultCallback = (res: any) => {
@@ -499,7 +823,7 @@ export default class RCIMIWEngine {
                     let { code, message } = res;
                     callback.onMessageSent?.({ code, message });
                 }
-            }
+            };
         }
         return this._invokeMethod('sendMessage', resultCallback, { message });
     }
@@ -512,6 +836,9 @@ export default class RCIMIWEngine {
      * @listener 接口回调可以监听 [onMediaMessageSending],[onMediaMessageAttached],[onMediaMessageSent]
      */
     sendMediaMessage(message: RCIMIWMediaMessage, listener: RCIMIWSendMediaMessageListener): Promise<number> {
+        if (!validate('message', message, AssertRules.OBJECT, true)) {
+            return paramErrorPromise;
+        }
         let resultCallback;
         if (listener) {
             resultCallback = (res: any) => {
@@ -531,7 +858,7 @@ export default class RCIMIWEngine {
                     let { code, message } = res;
                     listener.onMediaMessageSent?.({ code, message });
                 }
-            }
+            };
         }
         return this._invokeMethod('sendMediaMessage', resultCallback, { message });
     }
@@ -539,11 +866,17 @@ export default class RCIMIWEngine {
     /**
      * 取消发送媒体消息
      * @param message  需要取消发送的媒体消息实体
-     * @param callback 取消发送媒体消息的事件回调。SDK 从 5.3.1 版本开始支持 callback 方式回调。从 5.4.0 版本废弃该接口的其他回调方式。如果传入了 callback 参数，仅触发 callback 回调。
+     * @param callback 取消发送媒体消息的事件回调。SDK 从 5.3.1 版本开始支持 callback 方式回调。从 5.4.0 版本废弃该接口的其他回调方式，预计将在 6.x 版本删除此其他回调方式。如果传入了 callback 参数，仅触发 callback 回调。
      * @return 当次接口操作的状态码。0 代表调用成功 具体结果需要实现接口回调，非 0 代表当前接口调用操作失败，不会触发接口回调，详细错误参考错误码
      * @listener 接口回调可以监听 [onSendingMediaMessageCanceled]
      */
-    cancelSendingMediaMessage(message: RCIMIWMediaMessage, callback: IRCIMIWCancelSendingMediaMessageCallback): Promise<number> {
+    cancelSendingMediaMessage(
+        message: RCIMIWMediaMessage,
+        callback: IRCIMIWCancelSendingMediaMessageCallback
+    ): Promise<number> {
+        if (!validate('message', message, AssertRules.OBJECT, true)) {
+            return paramErrorPromise;
+        }
         let resultCallback;
         if (callback) {
             resultCallback = (res: any) => {
@@ -551,7 +884,7 @@ export default class RCIMIWEngine {
                     let { code, message } = res;
                     callback.onCancelSendingMediaMessageCalled?.({ code, message });
                 }
-            }
+            };
         }
         return this._invokeMethod('cancelSendingMediaMessage', resultCallback, { message });
     }
@@ -564,6 +897,9 @@ export default class RCIMIWEngine {
      * @listener [onMediaMessageDownloaded], [onMediaMessageDownloading]
      */
     downloadMediaMessage(message: RCIMIWMediaMessage, listener: RCIMIWDownloadMediaMessageListener): Promise<number> {
+        if (!validate('message', message, AssertRules.OBJECT, true)) {
+            return paramErrorPromise;
+        }
         let resultCallback;
         if (listener) {
             resultCallback = (res: any) => {
@@ -579,7 +915,7 @@ export default class RCIMIWEngine {
                     let { code, message } = res;
                     listener.onMediaMessageDownloaded?.({ code, message });
                 }
-            }
+            };
         }
         return this._invokeMethod('downloadMediaMessage', resultCallback, { message });
     }
@@ -587,11 +923,17 @@ export default class RCIMIWEngine {
     /**
      * 取消下载媒体消息
      * @param message  需要取消下载的媒体消息实体
-     * @param callback 取消下载媒体消息的事件回调。SDK 从 5.3.1 版本开始支持 callback 方式回调。从 5.4.0 版本废弃该接口的其他回调方式。如果传入了 callback 参数，仅触发 callback 回调。
+     * @param callback 取消下载媒体消息的事件回调。SDK 从 5.3.1 版本开始支持 callback 方式回调。从 5.4.0 版本废弃该接口的其他回调方式，预计将在 6.x 版本删除此其他回调方式。如果传入了 callback 参数，仅触发 callback 回调。
      * @return 当次接口操作的状态码。0 代表调用成功 具体结果需要实现接口回调，非 0 代表当前接口调用操作失败，不会触发接口回调，详细错误参考错误码
      * @listener [onDownloadingMediaMessageCanceled]
      */
-    cancelDownloadingMediaMessage(message: RCIMIWMediaMessage, callback: IRCIMIWCancelDownloadingMediaMessageCallback): Promise<number> {
+    cancelDownloadingMediaMessage(
+        message: RCIMIWMediaMessage,
+        callback: IRCIMIWCancelDownloadingMediaMessageCallback
+    ): Promise<number> {
+        if (!validate('message', message, AssertRules.OBJECT, true)) {
+            return paramErrorPromise;
+        }
         let resultCallback;
         if (callback) {
             resultCallback = (res: any) => {
@@ -599,7 +941,7 @@ export default class RCIMIWEngine {
                     let { code, message } = res;
                     callback.onCancelDownloadingMediaMessageCalled?.({ code, message });
                 }
-            }
+            };
         }
         return this._invokeMethod('cancelDownloadingMediaMessage', resultCallback, { message });
     }
@@ -611,9 +953,16 @@ export default class RCIMIWEngine {
      * @param channelId 频道 ID，仅支持超级群使用，其他会话类型传 null 即可
      * @return 当次接口操作的状态码。0 代表调用成功 具体结果需要实现接口回调，非 0 代表当前接口调用操作失败，不会触发接口回调，详细错误参考错误码
      * @listener [onConversationLoaded]
-     * @deprecated 用 {@link #getConversation(RCIMIWConversationType, String, String, IRCIMIWGetConversationCallback)} 代替
+     * @deprecated 用 {@link #getConversation(RCIMIWConversationType, String, String, IRCIMIWGetConversationCallback)} 代替， 预计将在 6.x 版本删除此接口。
      */
     loadConversation(type: RCIMIWConversationType, targetId: string, channelId: string): Promise<number> {
+        if (
+            !validate('type', type, AssertRules.NUMBER, true) ||
+            !validate('targetId', targetId, AssertRules.STRING, true) ||
+            !validate('channelId', channelId, AssertRules.ONLY_STRING, false)
+        ) {
+            return paramErrorPromise;
+        }
         let resultCallback;
         return this._invokeMethod('loadConversation', resultCallback, { type, targetId, channelId });
     }
@@ -623,11 +972,23 @@ export default class RCIMIWEngine {
      * @param type      会话类型
      * @param targetId  会话 ID
      * @param channelId 频道 ID，仅支持超级群使用，其他会话类型传 null 即可
-     * @param callback  获取会话事件回调。SDK 从 5.3.1 版本开始支持 callback 方式回调。从 5.4.0 版本废弃该接口的其他回调方式。如果传入了 callback 参数，仅触发 callback 回调。
+     * @param callback  获取会话事件回调。SDK 从 5.3.1 版本开始支持 callback 方式回调。从 5.4.0 版本废弃该接口的其他回调方式，预计将在 6.x 版本删除此其他回调方式。如果传入了 callback 参数，仅触发 callback 回调。
      * @return 当次接口操作的状态码。0 代表调用成功 具体结果需要实现接口回调，非 0 代表当前接口调用操作失败，不会触发接口回调，详细错误参考错误码
      * @listener [onConversationLoaded]
      */
-    getConversation(type: RCIMIWConversationType, targetId: string, channelId: string, callback: IRCIMIWGetConversationCallback): Promise<number> {
+    getConversation(
+        type: RCIMIWConversationType,
+        targetId: string,
+        channelId: string,
+        callback: IRCIMIWGetConversationCallback
+    ): Promise<number> {
+        if (
+            !validate('type', type, AssertRules.NUMBER, true) ||
+            !validate('targetId', targetId, AssertRules.STRING, true) ||
+            !validate('channelId', channelId, AssertRules.ONLY_STRING, false)
+        ) {
+            return paramErrorPromise;
+        }
         let resultCallback;
         if (callback) {
             resultCallback = (res: any) => {
@@ -639,7 +1000,7 @@ export default class RCIMIWEngine {
                     let { code } = res;
                     callback.onError?.({ code });
                 }
-            }
+            };
         }
         return this._invokeMethod('getConversation', resultCallback, { type, targetId, channelId });
     }
@@ -652,11 +1013,29 @@ export default class RCIMIWEngine {
      * @param count             查询的数量， 0 < count <= 50
      * @return 当次接口操作的状态码。0 代表调用成功 具体结果需要实现接口回调，非 0 代表当前接口调用操作失败，不会触发接口回调，详细错误参考错误码
      * @listener [onConversationsLoaded]
-     * @deprecated 用 {@link #getConversations(List, String, long, int, IRCIMIWGetConversationsCallback)} 代替
+     * @deprecated 用 {@link #getConversations(List, String, long, int, IRCIMIWGetConversationsCallback)} 代替， 预计将在 6.x 版本删除此接口。
      */
-    loadConversations(conversationTypes: Array<RCIMIWConversationType>, channelId: string, startTime: number, count: number): Promise<number> {
+    loadConversations(
+        conversationTypes: Array<RCIMIWConversationType>,
+        channelId: string,
+        startTime: number,
+        count: number
+    ): Promise<number> {
+        if (
+            !validate('conversationTypes', conversationTypes, AssertRules.NUMBER_ARRAY, true) ||
+            !validate('channelId', channelId, AssertRules.ONLY_STRING, false) ||
+            !validate('startTime', startTime, AssertRules.NUMBER, true) ||
+            !validate('count', count, AssertRules.NUMBER, true)
+        ) {
+            return paramErrorPromise;
+        }
         let resultCallback;
-        return this._invokeMethod('loadConversations', resultCallback, { conversationTypes, channelId, startTime, count });
+        return this._invokeMethod('loadConversations', resultCallback, {
+            conversationTypes,
+            channelId,
+            startTime,
+            count,
+        });
     }
 
     /**
@@ -665,11 +1044,25 @@ export default class RCIMIWEngine {
      * @param channelId         频道 ID，仅支持超级群使用，其他会话类型传 null 即可
      * @param startTime         时间戳（毫秒），获取小于此时间戳的会话，传 0 为查询最新数据
      * @param count             查询的数量， 0 < count <= 50
-     * @param callback          获取会话列表事件回调。SDK 从 5.3.1 版本开始支持 callback 方式回调。从 5.4.0 版本废弃该接口的其他回调方式。如果传入了 callback 参数，仅触发 callback 回调。
+     * @param callback          获取会话列表事件回调。SDK 从 5.3.1 版本开始支持 callback 方式回调。从 5.4.0 版本废弃该接口的其他回调方式，预计将在 6.x 版本删除此其他回调方式。如果传入了 callback 参数，仅触发 callback 回调。
      * @return 当次接口操作的状态码。0 代表调用成功 具体结果需要实现接口回调，非 0 代表当前接口调用操作失败，不会触发接口回调，详细错误参考错误码
      * @listener [onConversationsLoaded]
      */
-    getConversations(conversationTypes: Array<RCIMIWConversationType>, channelId: string, startTime: number, count: number, callback: IRCIMIWGetConversationsCallback): Promise<number> {
+    getConversations(
+        conversationTypes: Array<RCIMIWConversationType>,
+        channelId: string,
+        startTime: number,
+        count: number,
+        callback: IRCIMIWGetConversationsCallback
+    ): Promise<number> {
+        if (
+            !validate('conversationTypes', conversationTypes, AssertRules.NUMBER_ARRAY, true) ||
+            !validate('channelId', channelId, AssertRules.ONLY_STRING, false) ||
+            !validate('startTime', startTime, AssertRules.NUMBER, true) ||
+            !validate('count', count, AssertRules.NUMBER, true)
+        ) {
+            return paramErrorPromise;
+        }
         let resultCallback;
         if (callback) {
             resultCallback = (res: any) => {
@@ -681,9 +1074,43 @@ export default class RCIMIWEngine {
                     let { code } = res;
                     callback.onError?.({ code });
                 }
-            }
+            };
         }
-        return this._invokeMethod('getConversations', resultCallback, { conversationTypes, channelId, startTime, count });
+        return this._invokeMethod('getConversations', resultCallback, {
+            conversationTypes,
+            channelId,
+            startTime,
+            count,
+        });
+    }
+
+    /**
+     * 获取指定类型的含有未读消息的会话列表
+     * @param conversationTypes 支持单聊、群聊、系统会话
+     * @param callback 获取会话列表事件回调。
+     * @return 当次接口操作的状态码。0 代表调用成功 具体结果需要实现接口回调，非 0 代表当前接口调用操作失败，不会触发接口回调，详细错误参考错误码
+     */
+    getUnreadConversations(
+        conversationTypes: Array<RCIMIWConversationType>,
+        callback: IRCIMIWGetUnreadConversationsCallback
+    ): Promise<number> {
+        if (!validate('conversationTypes', conversationTypes, AssertRules.NUMBER_ARRAY, true)) {
+            return paramErrorPromise;
+        }
+        let resultCallback;
+        if (callback) {
+            resultCallback = (res: any) => {
+                if (res.callbackName === 'onSuccess') {
+                    let { t } = res;
+                    callback.onSuccess?.({ t });
+                }
+                if (res.callbackName === 'onError') {
+                    let { code } = res;
+                    callback.onError?.({ code });
+                }
+            };
+        }
+        return this._invokeMethod('getUnreadConversations', resultCallback, { conversationTypes });
     }
 
     /**
@@ -691,11 +1118,23 @@ export default class RCIMIWEngine {
      * @param type      会话类型
      * @param targetId  会话 ID
      * @param channelId 频道 ID，仅支持超级群使用，其他会话类型传 null 即可
-     * @param callback  移除会话事件回调。SDK 从 5.3.1 版本开始支持 callback 方式回调。从 5.4.0 版本废弃该接口的其他回调方式。如果传入了 callback 参数，仅触发 callback 回调。
+     * @param callback  移除会话事件回调。SDK 从 5.3.1 版本开始支持 callback 方式回调。从 5.4.0 版本废弃该接口的其他回调方式，预计将在 6.x 版本删除此其他回调方式。如果传入了 callback 参数，仅触发 callback 回调。
      * @return 当次接口操作的状态码。0 代表调用成功 具体结果需要实现接口回调，非 0 代表当前接口调用操作失败，不会触发接口回调，详细错误参考错误码
      * @listener [onConversationRemoved]
      */
-    removeConversation(type: RCIMIWConversationType, targetId: string, channelId: string, callback: IRCIMIWRemoveConversationCallback): Promise<number> {
+    removeConversation(
+        type: RCIMIWConversationType,
+        targetId: string,
+        channelId: string,
+        callback: IRCIMIWRemoveConversationCallback
+    ): Promise<number> {
+        if (
+            !validate('type', type, AssertRules.NUMBER, true) ||
+            !validate('targetId', targetId, AssertRules.STRING, true) ||
+            !validate('channelId', channelId, AssertRules.ONLY_STRING, false)
+        ) {
+            return paramErrorPromise;
+        }
         let resultCallback;
         if (callback) {
             resultCallback = (res: any) => {
@@ -703,7 +1142,7 @@ export default class RCIMIWEngine {
                     let { code } = res;
                     callback.onConversationRemoved?.({ code });
                 }
-            }
+            };
         }
         return this._invokeMethod('removeConversation', resultCallback, { type, targetId, channelId });
     }
@@ -712,11 +1151,21 @@ export default class RCIMIWEngine {
      * 根据会话类型移除会话
      * @param conversationTypes 会话类型集合
      * @param channelId         频道 ID，仅支持超级群使用，其他会话类型传 null 即可。
-     * @param callback          移除会话列表事件回调。SDK 从 5.3.1 版本开始支持 callback 方式回调。从 5.4.0 版本废弃该接口的其他回调方式。如果传入了 callback 参数，仅触发 callback 回调。
+     * @param callback          移除会话列表事件回调。SDK 从 5.3.1 版本开始支持 callback 方式回调。从 5.4.0 版本废弃该接口的其他回调方式，预计将在 6.x 版本删除此其他回调方式。如果传入了 callback 参数，仅触发 callback 回调。
      * @return 当次接口操作的状态码。0 代表调用成功 具体结果需要实现接口回调，非 0 代表当前接口调用操作失败，不会触发接口回调，详细错误参考错误码
      * @listener [onConversationsRemoved]
      */
-    removeConversations(conversationTypes: Array<RCIMIWConversationType>, channelId: string, callback: IRCIMIWRemoveConversationsCallback): Promise<number> {
+    removeConversations(
+        conversationTypes: Array<RCIMIWConversationType>,
+        channelId: string,
+        callback: IRCIMIWRemoveConversationsCallback
+    ): Promise<number> {
+        if (
+            !validate('conversationTypes', conversationTypes, AssertRules.NUMBER_ARRAY, true) ||
+            !validate('channelId', channelId, AssertRules.ONLY_STRING, false)
+        ) {
+            return paramErrorPromise;
+        }
         let resultCallback;
         if (callback) {
             resultCallback = (res: any) => {
@@ -724,7 +1173,7 @@ export default class RCIMIWEngine {
                     let { code } = res;
                     callback.onConversationsRemoved?.({ code });
                 }
-            }
+            };
         }
         return this._invokeMethod('removeConversations', resultCallback, { conversationTypes, channelId });
     }
@@ -737,9 +1186,16 @@ export default class RCIMIWEngine {
      * @param channelId 频道 ID，仅支持超级群使用，其他会话类型传 null 即可。
      * @return 当次接口操作的状态码。0 代表调用成功 具体结果需要实现接口回调，非 0 代表当前接口调用操作失败，不会触发接口回调，详细错误参考错误码
      * @listener [onUnreadCountLoaded]
-     * @deprecated 用 {@link #getUnreadCount(RCIMIWConversationType, String, String, IRCIMIWGetUnreadCountCallback)} 代替
+     * @deprecated 用 {@link #getUnreadCount(RCIMIWConversationType, String, String, IRCIMIWGetUnreadCountCallback)} 代替， 预计将在 6.x 版本删除此接口。
      */
     loadUnreadCount(type: RCIMIWConversationType, targetId: string, channelId: string): Promise<number> {
+        if (
+            !validate('type', type, AssertRules.NUMBER, true) ||
+            !validate('targetId', targetId, AssertRules.STRING, true) ||
+            !validate('channelId', channelId, AssertRules.ONLY_STRING, false)
+        ) {
+            return paramErrorPromise;
+        }
         let resultCallback;
         return this._invokeMethod('loadUnreadCount', resultCallback, { type, targetId, channelId });
     }
@@ -750,11 +1206,23 @@ export default class RCIMIWEngine {
      * @param type      会话类型
      * @param targetId  会话 ID
      * @param channelId 频道 ID，仅支持超级群使用，其他会话类型传 null 即可。
-     * @param callback  获取会话未读数事件回调。SDK 从 5.3.1 版本开始支持 callback 方式回调。从 5.4.0 版本废弃该接口的其他回调方式。如果传入了 callback 参数，仅触发 callback 回调。
+     * @param callback  获取会话未读数事件回调。SDK 从 5.3.1 版本开始支持 callback 方式回调。从 5.4.0 版本废弃该接口的其他回调方式，预计将在 6.x 版本删除此其他回调方式。如果传入了 callback 参数，仅触发 callback 回调。
      * @return 当次接口操作的状态码。0 代表调用成功 具体结果需要实现接口回调，非 0 代表当前接口调用操作失败，不会触发接口回调，详细错误参考错误码
      * @listener [onUnreadCountLoaded]
      */
-    getUnreadCount(type: RCIMIWConversationType, targetId: string, channelId: string, callback: IRCIMIWGetUnreadCountCallback): Promise<number> {
+    getUnreadCount(
+        type: RCIMIWConversationType,
+        targetId: string,
+        channelId: string,
+        callback: IRCIMIWGetUnreadCountCallback
+    ): Promise<number> {
+        if (
+            !validate('type', type, AssertRules.NUMBER, true) ||
+            !validate('targetId', targetId, AssertRules.STRING, true) ||
+            !validate('channelId', channelId, AssertRules.ONLY_STRING, false)
+        ) {
+            return paramErrorPromise;
+        }
         let resultCallback;
         if (callback) {
             resultCallback = (res: any) => {
@@ -766,7 +1234,7 @@ export default class RCIMIWEngine {
                     let { code } = res;
                     callback.onError?.({ code });
                 }
-            }
+            };
         }
         return this._invokeMethod('getUnreadCount', resultCallback, { type, targetId, channelId });
     }
@@ -776,9 +1244,12 @@ export default class RCIMIWEngine {
      * @param channelId 频道 ID，仅支持超级群使用，其他会话类型传 null 即可。
      * @return 当次接口操作的状态码。0 代表调用成功 具体结果需要实现接口回调，非 0 代表当前接口调用操作失败，不会触发接口回调，详细错误参考错误码
      * @listener [onTotalUnreadCountLoaded]
-     * @deprecated 用 {@link #getTotalUnreadCount(String, IRCIMIWGetTotalUnreadCountCallback)} 代替
+     * @deprecated 用 {@link #getTotalUnreadCount(String, IRCIMIWGetTotalUnreadCountCallback)} 代替， 预计将在 6.x 版本删除此接口。
      */
     loadTotalUnreadCount(channelId: string): Promise<number> {
+        if (!validate('channelId', channelId, AssertRules.ONLY_STRING, false)) {
+            return paramErrorPromise;
+        }
         let resultCallback;
         return this._invokeMethod('loadTotalUnreadCount', resultCallback, { channelId });
     }
@@ -786,11 +1257,14 @@ export default class RCIMIWEngine {
     /**
      * 获取所有未读数
      * @param channelId 频道 ID，仅支持超级群使用，其他会话类型传 null 即可。
-     * @param callback  获取所有未读数事件回调。SDK 从 5.3.1 版本开始支持 callback 方式回调。从 5.4.0 版本废弃该接口的其他回调方式。如果传入了 callback 参数，仅触发 callback 回调。
+     * @param callback  获取所有未读数事件回调。SDK 从 5.3.1 版本开始支持 callback 方式回调。从 5.4.0 版本废弃该接口的其他回调方式，预计将在 6.x 版本删除此其他回调方式。如果传入了 callback 参数，仅触发 callback 回调。
      * @return 当次接口操作的状态码。0 代表调用成功 具体结果需要实现接口回调，非 0 代表当前接口调用操作失败，不会触发接口回调，详细错误参考错误码
      * @listener [onTotalUnreadCountLoaded]
      */
     getTotalUnreadCount(channelId: string, callback: IRCIMIWGetTotalUnreadCountCallback): Promise<number> {
+        if (!validate('channelId', channelId, AssertRules.ONLY_STRING, false)) {
+            return paramErrorPromise;
+        }
         let resultCallback;
         if (callback) {
             resultCallback = (res: any) => {
@@ -802,7 +1276,7 @@ export default class RCIMIWEngine {
                     let { code } = res;
                     callback.onError?.({ code });
                 }
-            }
+            };
         }
         return this._invokeMethod('getTotalUnreadCount', resultCallback, { channelId });
     }
@@ -815,9 +1289,16 @@ export default class RCIMIWEngine {
      * @param channelId 频道 ID，仅支持超级群使用，其他会话类型传 null 即可。
      * @return 当次接口操作的状态码。0 代表调用成功 具体结果需要实现接口回调，非 0 代表当前接口调用操作失败，不会触发接口回调，详细错误参考错误码
      * @listener [onUnreadMentionedCountLoaded]
-     * @deprecated 用 {@link #getUnreadMentionedCount(RCIMIWConversationType, String, String, IRCIMIWGetUnreadMentionedCountCallback)} 代替
+     * @deprecated 用 {@link #getUnreadMentionedCount(RCIMIWConversationType, String, String, IRCIMIWGetUnreadMentionedCountCallback)} 代替， 预计将在 6.x 版本删除此接口。
      */
     loadUnreadMentionedCount(type: RCIMIWConversationType, targetId: string, channelId: string): Promise<number> {
+        if (
+            !validate('type', type, AssertRules.NUMBER, true) ||
+            !validate('targetId', targetId, AssertRules.STRING, true) ||
+            !validate('channelId', channelId, AssertRules.ONLY_STRING, false)
+        ) {
+            return paramErrorPromise;
+        }
         let resultCallback;
         return this._invokeMethod('loadUnreadMentionedCount', resultCallback, { type, targetId, channelId });
     }
@@ -828,11 +1309,23 @@ export default class RCIMIWEngine {
      * @param type      会话类型
      * @param targetId  会话 ID
      * @param channelId 频道 ID，仅支持超级群使用，其他会话类型传 null 即可。
-     * @param callback  获取会话中未读的 @ 消息数量事件回调。SDK 从 5.3.1 版本开始支持 callback 方式回调。从 5.4.0 版本废弃该接口的其他回调方式。如果传入了 callback 参数，仅触发 callback 回调。
+     * @param callback  获取会话中未读的 @ 消息数量事件回调。SDK 从 5.3.1 版本开始支持 callback 方式回调。从 5.4.0 版本废弃该接口的其他回调方式，预计将在 6.x 版本删除此其他回调方式。如果传入了 callback 参数，仅触发 callback 回调。
      * @return 当次接口操作的状态码。0 代表调用成功 具体结果需要实现接口回调，非 0 代表当前接口调用操作失败，不会触发接口回调，详细错误参考错误码
      * @listener [onUnreadMentionedCountLoaded]
      */
-    getUnreadMentionedCount(type: RCIMIWConversationType, targetId: string, channelId: string, callback: IRCIMIWGetUnreadMentionedCountCallback): Promise<number> {
+    getUnreadMentionedCount(
+        type: RCIMIWConversationType,
+        targetId: string,
+        channelId: string,
+        callback: IRCIMIWGetUnreadMentionedCountCallback
+    ): Promise<number> {
+        if (
+            !validate('type', type, AssertRules.NUMBER, true) ||
+            !validate('targetId', targetId, AssertRules.STRING, true) ||
+            !validate('channelId', channelId, AssertRules.ONLY_STRING, false)
+        ) {
+            return paramErrorPromise;
+        }
         let resultCallback;
         if (callback) {
             resultCallback = (res: any) => {
@@ -844,7 +1337,7 @@ export default class RCIMIWEngine {
                     let { code } = res;
                     callback.onError?.({ code });
                 }
-            }
+            };
         }
         return this._invokeMethod('getUnreadMentionedCount', resultCallback, { type, targetId, channelId });
     }
@@ -853,7 +1346,7 @@ export default class RCIMIWEngine {
      * 加载当前用户加入的所有超级群会话的未读消息数的总和。
      * @return 当次接口操作的状态码。0 代表调用成功 具体结果需要实现接口回调，非 0 代表当前接口调用操作失败，不会触发接口回调，详细错误参考错误码
      * @listener [onUltraGroupAllUnreadCountLoaded]
-     * @deprecated 用 {@link #getUltraGroupAllUnreadCount(IRCIMIWGetUltraGroupAllUnreadCountCallback)} 代替
+     * @deprecated 用 {@link #getUltraGroupAllUnreadCount(IRCIMIWGetUltraGroupAllUnreadCountCallback)} 代替， 预计将在 6.x 版本删除此接口。
      */
     loadUltraGroupAllUnreadCount(): Promise<number> {
         let resultCallback;
@@ -862,7 +1355,7 @@ export default class RCIMIWEngine {
 
     /**
      * 获取当前用户加入的所有超级群会话的未读消息数的总和。
-     * @param callback 事件回调。SDK 从 5.3.1 版本开始支持 callback 方式回调。从 5.4.0 版本废弃该接口的其他回调方式。如果传入了 callback 参数，仅触发 callback 回调。
+     * @param callback 事件回调。SDK 从 5.3.1 版本开始支持 callback 方式回调。从 5.4.0 版本废弃该接口的其他回调方式，预计将在 6.x 版本删除此其他回调方式。如果传入了 callback 参数，仅触发 callback 回调。
      * @return 当次接口操作的状态码。0 代表调用成功 具体结果需要实现接口回调，非 0 代表当前接口调用操作失败，不会触发接口回调，详细错误参考错误码
      * @listener [onUltraGroupAllUnreadCountLoaded]
      */
@@ -878,7 +1371,7 @@ export default class RCIMIWEngine {
                     let { code } = res;
                     callback.onError?.({ code });
                 }
-            }
+            };
         }
         return this._invokeMethod('getUltraGroupAllUnreadCount', resultCallback, {});
     }
@@ -887,7 +1380,7 @@ export default class RCIMIWEngine {
      * 加载当前用户加入的所有超级群会话中的未读 @ 消息数的总和。
      * @return 当次接口操作的状态码。0 代表调用成功 具体结果需要实现接口回调，非 0 代表当前接口调用操作失败，不会触发接口回调，详细错误参考错误码
      * @listener [onUltraGroupAllUnreadMentionedCountLoaded]
-     * @deprecated 用 {@link #getUltraGroupAllUnreadMentionedCount(IRCIMIWGetUltraGroupAllUnreadMentionedCountCallback)} 代替
+     * @deprecated 用 {@link #getUltraGroupAllUnreadMentionedCount(IRCIMIWGetUltraGroupAllUnreadMentionedCountCallback)} 代替， 预计将在 6.x 版本删除此接口。
      */
     loadUltraGroupAllUnreadMentionedCount(): Promise<number> {
         let resultCallback;
@@ -896,11 +1389,13 @@ export default class RCIMIWEngine {
 
     /**
      * 获取当前用户加入的所有超级群会话中的未读 @ 消息数的总和。
-     * @param callback 事件回调。SDK 从 5.3.1 版本开始支持 callback 方式回调。从 5.4.0 版本废弃该接口的其他回调方式。如果传入了 callback 参数，仅触发 callback 回调。
+     * @param callback 事件回调。SDK 从 5.3.1 版本开始支持 callback 方式回调。从 5.4.0 版本废弃该接口的其他回调方式，预计将在 6.x 版本删除此其他回调方式。如果传入了 callback 参数，仅触发 callback 回调。
      * @return 当次接口操作的状态码。0 代表调用成功 具体结果需要实现接口回调，非 0 代表当前接口调用操作失败，不会触发接口回调，详细错误参考错误码
      * @listener [onUltraGroupAllUnreadMentionedCountLoaded]
      */
-    getUltraGroupAllUnreadMentionedCount(callback: IRCIMIWGetUltraGroupAllUnreadMentionedCountCallback): Promise<number> {
+    getUltraGroupAllUnreadMentionedCount(
+        callback: IRCIMIWGetUltraGroupAllUnreadMentionedCountCallback
+    ): Promise<number> {
         let resultCallback;
         if (callback) {
             resultCallback = (res: any) => {
@@ -912,7 +1407,7 @@ export default class RCIMIWEngine {
                     let { code } = res;
                     callback.onError?.({ code });
                 }
-            }
+            };
         }
         return this._invokeMethod('getUltraGroupAllUnreadMentionedCount', resultCallback, {});
     }
@@ -922,9 +1417,12 @@ export default class RCIMIWEngine {
      * @param targetId 会话 ID
      * @return 当次接口操作的状态码。0 代表调用成功 具体结果需要实现接口回调，非 0 代表当前接口调用操作失败，不会触发接口回调，详细错误参考错误码
      * @listener [onUltraGroupUnreadCountLoaded]
-     * @deprecated 用 {@link #getUltraGroupUnreadCount(String, IRCIMIWGetUltraGroupUnreadCountCallback)} 代替
+     * @deprecated 用 {@link #getUltraGroupUnreadCount(String, IRCIMIWGetUltraGroupUnreadCountCallback)} 代替， 预计将在 6.x 版本删除此接口。
      */
     loadUltraGroupUnreadCount(targetId: string): Promise<number> {
+        if (!validate('targetId', targetId, AssertRules.STRING, true)) {
+            return paramErrorPromise;
+        }
         let resultCallback;
         return this._invokeMethod('loadUltraGroupUnreadCount', resultCallback, { targetId });
     }
@@ -932,11 +1430,14 @@ export default class RCIMIWEngine {
     /**
      * 获取指定会话的未读消息数
      * @param targetId 会话 ID
-     * @param callback 事件回调。SDK 从 5.3.1 版本开始支持 callback 方式回调。从 5.4.0 版本废弃该接口的其他回调方式。如果传入了 callback 参数，仅触发 callback 回调。
+     * @param callback 事件回调。SDK 从 5.3.1 版本开始支持 callback 方式回调。从 5.4.0 版本废弃该接口的其他回调方式，预计将在 6.x 版本删除此其他回调方式。如果传入了 callback 参数，仅触发 callback 回调。
      * @return 当次接口操作的状态码。0 代表调用成功 具体结果需要实现接口回调，非 0 代表当前接口调用操作失败，不会触发接口回调，详细错误参考错误码
      * @listener [onUltraGroupUnreadCountLoaded]
      */
     getUltraGroupUnreadCount(targetId: string, callback: IRCIMIWGetUltraGroupUnreadCountCallback): Promise<number> {
+        if (!validate('targetId', targetId, AssertRules.STRING, true)) {
+            return paramErrorPromise;
+        }
         let resultCallback;
         if (callback) {
             resultCallback = (res: any) => {
@@ -948,7 +1449,7 @@ export default class RCIMIWEngine {
                     let { code } = res;
                     callback.onError?.({ code });
                 }
-            }
+            };
         }
         return this._invokeMethod('getUltraGroupUnreadCount', resultCallback, { targetId });
     }
@@ -958,9 +1459,12 @@ export default class RCIMIWEngine {
      * @param targetId 会话 ID
      * @return 当次接口操作的状态码。0 代表调用成功 具体结果需要实现接口回调，非 0 代表当前接口调用操作失败，不会触发接口回调，详细错误参考错误码
      * @listener [onUltraGroupUnreadMentionedCountLoaded]
-     * @deprecated 用 {@link #getUltraGroupUnreadMentionedCount(String, IRCIMIWGetUltraGroupUnreadMentionedCountCallback)} 代替
+     * @deprecated 用 {@link #getUltraGroupUnreadMentionedCount(String, IRCIMIWGetUltraGroupUnreadMentionedCountCallback)} 代替， 预计将在 6.x 版本删除此接口。
      */
     loadUltraGroupUnreadMentionedCount(targetId: string): Promise<number> {
+        if (!validate('targetId', targetId, AssertRules.STRING, true)) {
+            return paramErrorPromise;
+        }
         let resultCallback;
         return this._invokeMethod('loadUltraGroupUnreadMentionedCount', resultCallback, { targetId });
     }
@@ -968,11 +1472,17 @@ export default class RCIMIWEngine {
     /**
      * 获取超级群会话中被 @ 的消息数
      * @param targetId 会话 ID
-     * @param callback 事件回调。SDK 从 5.3.1 版本开始支持 callback 方式回调。从 5.4.0 版本废弃该接口的其他回调方式。如果传入了 callback 参数，仅触发 callback 回调。
+     * @param callback 事件回调。SDK 从 5.3.1 版本开始支持 callback 方式回调。从 5.4.0 版本废弃该接口的其他回调方式，预计将在 6.x 版本删除此其他回调方式。如果传入了 callback 参数，仅触发 callback 回调。
      * @return 当次接口操作的状态码。0 代表调用成功 具体结果需要实现接口回调，非 0 代表当前接口调用操作失败，不会触发接口回调，详细错误参考错误码
      * @listener [onUltraGroupUnreadMentionedCountLoaded]
      */
-    getUltraGroupUnreadMentionedCount(targetId: string, callback: IRCIMIWGetUltraGroupUnreadMentionedCountCallback): Promise<number> {
+    getUltraGroupUnreadMentionedCount(
+        targetId: string,
+        callback: IRCIMIWGetUltraGroupUnreadMentionedCountCallback
+    ): Promise<number> {
+        if (!validate('targetId', targetId, AssertRules.STRING, true)) {
+            return paramErrorPromise;
+        }
         let resultCallback;
         if (callback) {
             resultCallback = (res: any) => {
@@ -984,7 +1494,7 @@ export default class RCIMIWEngine {
                     let { code } = res;
                     callback.onError?.({ code });
                 }
-            }
+            };
         }
         return this._invokeMethod('getUltraGroupUnreadMentionedCount', resultCallback, { targetId });
     }
@@ -997,11 +1507,26 @@ export default class RCIMIWEngine {
      * @param contain           是否包含免打扰消息的未读消息数。
      * @return 当次接口操作的状态码。0 代表调用成功 具体结果需要实现接口回调，非 0 代表当前接口调用操作失败，不会触发接口回调，详细错误参考错误码
      * @listener [onUnreadCountByConversationTypesLoaded]
-     * @deprecated 用 {@link #getUnreadCountByConversationTypes(List, String, boolean, IRCIMIWGetUnreadCountByConversationTypesCallback)} 代替
+     * @deprecated 用 {@link #getUnreadCountByConversationTypes(List, String, boolean, IRCIMIWGetUnreadCountByConversationTypesCallback)} 代替， 预计将在 6.x 版本删除此接口。
      */
-    loadUnreadCountByConversationTypes(conversationTypes: Array<RCIMIWConversationType>, channelId: string, contain: boolean): Promise<number> {
+    loadUnreadCountByConversationTypes(
+        conversationTypes: Array<RCIMIWConversationType>,
+        channelId: string,
+        contain: boolean
+    ): Promise<number> {
+        if (
+            !validate('conversationTypes', conversationTypes, AssertRules.NUMBER_ARRAY, true) ||
+            !validate('channelId', channelId, AssertRules.ONLY_STRING, false) ||
+            !validate('contain', contain, AssertRules.BOOLEAN, true)
+        ) {
+            return paramErrorPromise;
+        }
         let resultCallback;
-        return this._invokeMethod('loadUnreadCountByConversationTypes', resultCallback, { conversationTypes, channelId, contain });
+        return this._invokeMethod('loadUnreadCountByConversationTypes', resultCallback, {
+            conversationTypes,
+            channelId,
+            contain,
+        });
     }
 
     /**
@@ -1010,11 +1535,23 @@ export default class RCIMIWEngine {
      * @param conversationTypes 会话类型集合
      * @param channelId         频道 ID，仅支持超级群使用，其他会话类型传 null 即可。
      * @param contain           是否包含免打扰消息的未读消息数。
-     * @param callback          事件回调。SDK 从 5.3.1 版本开始支持 callback 方式回调。从 5.4.0 版本废弃该接口的其他回调方式。如果传入了 callback 参数，仅触发 callback 回调。
+     * @param callback          事件回调。SDK 从 5.3.1 版本开始支持 callback 方式回调。从 5.4.0 版本废弃该接口的其他回调方式，预计将在 6.x 版本删除此其他回调方式。如果传入了 callback 参数，仅触发 callback 回调。
      * @return 当次接口操作的状态码。0 代表调用成功 具体结果需要实现接口回调，非 0 代表当前接口调用操作失败，不会触发接口回调，详细错误参考错误码
      * @listener [onUnreadCountByConversationTypesLoaded]
      */
-    getUnreadCountByConversationTypes(conversationTypes: Array<RCIMIWConversationType>, channelId: string, contain: boolean, callback: IRCIMIWGetUnreadCountByConversationTypesCallback): Promise<number> {
+    getUnreadCountByConversationTypes(
+        conversationTypes: Array<RCIMIWConversationType>,
+        channelId: string,
+        contain: boolean,
+        callback: IRCIMIWGetUnreadCountByConversationTypesCallback
+    ): Promise<number> {
+        if (
+            !validate('conversationTypes', conversationTypes, AssertRules.NUMBER_ARRAY, true) ||
+            !validate('channelId', channelId, AssertRules.ONLY_STRING, false) ||
+            !validate('contain', contain, AssertRules.BOOLEAN, true)
+        ) {
+            return paramErrorPromise;
+        }
         let resultCallback;
         if (callback) {
             resultCallback = (res: any) => {
@@ -1026,9 +1563,13 @@ export default class RCIMIWEngine {
                     let { code } = res;
                     callback.onError?.({ code });
                 }
-            }
+            };
         }
-        return this._invokeMethod('getUnreadCountByConversationTypes', resultCallback, { conversationTypes, channelId, contain });
+        return this._invokeMethod('getUnreadCountByConversationTypes', resultCallback, {
+            conversationTypes,
+            channelId,
+            contain,
+        });
     }
 
     /**
@@ -1038,11 +1579,25 @@ export default class RCIMIWEngine {
      * @param targetId  会话 ID
      * @param channelId 频道 ID，仅支持超级群使用，其他会话类型传 null 即可。
      * @param timestamp 该会话已阅读的最后一条消息的发送时间戳，清除所有传入当前最新时间戳
-     * @param callback  事件回调。SDK 从 5.3.1 版本开始支持 callback 方式回调。从 5.4.0 版本废弃该接口的其他回调方式。如果传入了 callback 参数，仅触发 callback 回调。
+     * @param callback  事件回调。SDK 从 5.3.1 版本开始支持 callback 方式回调。从 5.4.0 版本废弃该接口的其他回调方式，预计将在 6.x 版本删除此其他回调方式。如果传入了 callback 参数，仅触发 callback 回调。
      * @return 当次接口操作的状态码。0 代表调用成功 具体结果需要实现接口回调，非 0 代表当前接口调用操作失败，不会触发接口回调，详细错误参考错误码
      * @listener [onUnreadCountCleared]
      */
-    clearUnreadCount(type: RCIMIWConversationType, targetId: string, channelId: string, timestamp: number, callback: IRCIMIWClearUnreadCountCallback): Promise<number> {
+    clearUnreadCount(
+        type: RCIMIWConversationType,
+        targetId: string,
+        channelId: string,
+        timestamp: number,
+        callback: IRCIMIWClearUnreadCountCallback
+    ): Promise<number> {
+        if (
+            !validate('type', type, AssertRules.NUMBER, true) ||
+            !validate('targetId', targetId, AssertRules.STRING, true) ||
+            !validate('channelId', channelId, AssertRules.ONLY_STRING, false) ||
+            !validate('timestamp', timestamp, AssertRules.NUMBER, true)
+        ) {
+            return paramErrorPromise;
+        }
         let resultCallback;
         if (callback) {
             resultCallback = (res: any) => {
@@ -1050,7 +1605,7 @@ export default class RCIMIWEngine {
                     let { code } = res;
                     callback.onUnreadCountCleared?.({ code });
                 }
-            }
+            };
         }
         return this._invokeMethod('clearUnreadCount', resultCallback, { type, targetId, channelId, timestamp });
     }
@@ -1061,11 +1616,25 @@ export default class RCIMIWEngine {
      * @param targetId  会话 ID
      * @param channelId 频道 ID，仅支持超级群使用，其他会话类型传 null 即可。
      * @param draft     草稿的文字内容。
-     * @param callback  事件回调。SDK 从 5.3.1 版本开始支持 callback 方式回调。从 5.4.0 版本废弃该接口的其他回调方式。如果传入了 callback 参数，仅触发 callback 回调。
+     * @param callback  事件回调。SDK 从 5.3.1 版本开始支持 callback 方式回调。从 5.4.0 版本废弃该接口的其他回调方式，预计将在 6.x 版本删除此其他回调方式。如果传入了 callback 参数，仅触发 callback 回调。
      * @return 当次接口操作的状态码。0 代表调用成功 具体结果需要实现接口回调，非 0 代表当前接口调用操作失败，不会触发接口回调，详细错误参考错误码
      * @listener [onDraftMessageSaved]
      */
-    saveDraftMessage(type: RCIMIWConversationType, targetId: string, channelId: string, draft: string, callback: IRCIMIWSaveDraftMessageCallback): Promise<number> {
+    saveDraftMessage(
+        type: RCIMIWConversationType,
+        targetId: string,
+        channelId: string,
+        draft: string,
+        callback: IRCIMIWSaveDraftMessageCallback
+    ): Promise<number> {
+        if (
+            !validate('type', type, AssertRules.NUMBER, true) ||
+            !validate('targetId', targetId, AssertRules.STRING, true) ||
+            !validate('channelId', channelId, AssertRules.ONLY_STRING, false) ||
+            !validate('draft', draft, AssertRules.STRING, true)
+        ) {
+            return paramErrorPromise;
+        }
         let resultCallback;
         if (callback) {
             resultCallback = (res: any) => {
@@ -1073,7 +1642,7 @@ export default class RCIMIWEngine {
                     let { code } = res;
                     callback.onDraftMessageSaved?.({ code });
                 }
-            }
+            };
         }
         return this._invokeMethod('saveDraftMessage', resultCallback, { type, targetId, channelId, draft });
     }
@@ -1085,9 +1654,16 @@ export default class RCIMIWEngine {
      * @param channelId 频道 ID，仅支持超级群使用，其他会话类型传 null 即可。
      * @return 当次接口操作的状态码。0 代表调用成功 具体结果需要实现接口回调，非 0 代表当前接口调用操作失败，不会触发接口回调，详细错误参考错误码
      * @listener [onDraftMessageLoaded]
-     * @deprecated 用 {@link #getDraftMessage(RCIMIWConversationType, String, String, IRCIMIWGetDraftMessageCallback)} 代替
+     * @deprecated 用 {@link #getDraftMessage(RCIMIWConversationType, String, String, IRCIMIWGetDraftMessageCallback)} 代替， 预计将在 6.x 版本删除此接口。
      */
     loadDraftMessage(type: RCIMIWConversationType, targetId: string, channelId: string): Promise<number> {
+        if (
+            !validate('type', type, AssertRules.NUMBER, true) ||
+            !validate('targetId', targetId, AssertRules.STRING, true) ||
+            !validate('channelId', channelId, AssertRules.ONLY_STRING, false)
+        ) {
+            return paramErrorPromise;
+        }
         let resultCallback;
         return this._invokeMethod('loadDraftMessage', resultCallback, { type, targetId, channelId });
     }
@@ -1097,11 +1673,23 @@ export default class RCIMIWEngine {
      * @param type      会话类型
      * @param targetId  会话 ID
      * @param channelId 频道 ID，仅支持超级群使用，其他会话类型传 null 即可。
-     * @param callback  事件回调。SDK 从 5.3.1 版本开始支持 callback 方式回调。从 5.4.0 版本废弃该接口的其他回调方式。如果传入了 callback 参数，仅触发 callback 回调。
+     * @param callback  事件回调。SDK 从 5.3.1 版本开始支持 callback 方式回调。从 5.4.0 版本废弃该接口的其他回调方式，预计将在 6.x 版本删除此其他回调方式。如果传入了 callback 参数，仅触发 callback 回调。
      * @return 当次接口操作的状态码。0 代表调用成功 具体结果需要实现接口回调，非 0 代表当前接口调用操作失败，不会触发接口回调，详细错误参考错误码
      * @listener [onDraftMessageLoaded]
      */
-    getDraftMessage(type: RCIMIWConversationType, targetId: string, channelId: string, callback: IRCIMIWGetDraftMessageCallback): Promise<number> {
+    getDraftMessage(
+        type: RCIMIWConversationType,
+        targetId: string,
+        channelId: string,
+        callback: IRCIMIWGetDraftMessageCallback
+    ): Promise<number> {
+        if (
+            !validate('type', type, AssertRules.NUMBER, true) ||
+            !validate('targetId', targetId, AssertRules.STRING, true) ||
+            !validate('channelId', channelId, AssertRules.ONLY_STRING, false)
+        ) {
+            return paramErrorPromise;
+        }
         let resultCallback;
         if (callback) {
             resultCallback = (res: any) => {
@@ -1113,7 +1701,7 @@ export default class RCIMIWEngine {
                     let { code } = res;
                     callback.onError?.({ code });
                 }
-            }
+            };
         }
         return this._invokeMethod('getDraftMessage', resultCallback, { type, targetId, channelId });
     }
@@ -1123,11 +1711,23 @@ export default class RCIMIWEngine {
      * @param type      会话类型
      * @param targetId  会话 ID
      * @param channelId 频道 ID，仅支持超级群使用，其他会话类型传 null 即可。
-     * @param callback  事件回调。SDK 从 5.3.1 版本开始支持 callback 方式回调。从 5.4.0 版本废弃该接口的其他回调方式。如果传入了 callback 参数，仅触发 callback 回调。
+     * @param callback  事件回调。SDK 从 5.3.1 版本开始支持 callback 方式回调。从 5.4.0 版本废弃该接口的其他回调方式，预计将在 6.x 版本删除此其他回调方式。如果传入了 callback 参数，仅触发 callback 回调。
      * @return 当次接口操作的状态码。0 代表调用成功 具体结果需要实现接口回调，非 0 代表当前接口调用操作失败，不会触发接口回调，详细错误参考错误码
      * @listener [onDraftMessageCleared]
      */
-    clearDraftMessage(type: RCIMIWConversationType, targetId: string, channelId: string, callback: IRCIMIWClearDraftMessageCallback): Promise<number> {
+    clearDraftMessage(
+        type: RCIMIWConversationType,
+        targetId: string,
+        channelId: string,
+        callback: IRCIMIWClearDraftMessageCallback
+    ): Promise<number> {
+        if (
+            !validate('type', type, AssertRules.NUMBER, true) ||
+            !validate('targetId', targetId, AssertRules.STRING, true) ||
+            !validate('channelId', channelId, AssertRules.ONLY_STRING, false)
+        ) {
+            return paramErrorPromise;
+        }
         let resultCallback;
         if (callback) {
             resultCallback = (res: any) => {
@@ -1135,7 +1735,7 @@ export default class RCIMIWEngine {
                     let { code } = res;
                     callback.onDraftMessageCleared?.({ code });
                 }
-            }
+            };
         }
         return this._invokeMethod('clearDraftMessage', resultCallback, { type, targetId, channelId });
     }
@@ -1146,9 +1746,15 @@ export default class RCIMIWEngine {
      * @param channelId         频道 ID，仅支持超级群使用，其他会话类型传 null 即可。
      * @return 当次接口操作的状态码。0 代表调用成功 具体结果需要实现接口回调，非 0 代表当前接口调用操作失败，不会触发接口回调，详细错误参考错误码
      * @listener [onBlockedConversationsLoaded]
-     * @deprecated 用 {@link #getBlockedConversations(List, String, IRCIMIWGetBlockedConversationsCallback)} 代替
+     * @deprecated 用 {@link #getBlockedConversations(List, String, IRCIMIWGetBlockedConversationsCallback)} 代替， 预计将在 6.x 版本删除此接口。
      */
     loadBlockedConversations(conversationTypes: Array<RCIMIWConversationType>, channelId: string): Promise<number> {
+        if (
+            !validate('conversationTypes', conversationTypes, AssertRules.NUMBER_ARRAY, true) ||
+            !validate('channelId', channelId, AssertRules.ONLY_STRING, false)
+        ) {
+            return paramErrorPromise;
+        }
         let resultCallback;
         return this._invokeMethod('loadBlockedConversations', resultCallback, { conversationTypes, channelId });
     }
@@ -1157,11 +1763,21 @@ export default class RCIMIWEngine {
      * 获取免打扰的会话列表。
      * @param conversationTypes 会话类型集合
      * @param channelId         频道 ID，仅支持超级群使用，其他会话类型传 null 即可。
-     * @param callback          事件回调。SDK 从 5.3.1 版本开始支持 callback 方式回调。从 5.4.0 版本废弃该接口的其他回调方式。如果传入了 callback 参数，仅触发 callback 回调。
+     * @param callback          事件回调。SDK 从 5.3.1 版本开始支持 callback 方式回调。从 5.4.0 版本废弃该接口的其他回调方式，预计将在 6.x 版本删除此其他回调方式。如果传入了 callback 参数，仅触发 callback 回调。
      * @return 当次接口操作的状态码。0 代表调用成功 具体结果需要实现接口回调，非 0 代表当前接口调用操作失败，不会触发接口回调，详细错误参考错误码
      * @listener [onBlockedConversationsLoaded]
      */
-    getBlockedConversations(conversationTypes: Array<RCIMIWConversationType>, channelId: string, callback: IRCIMIWGetBlockedConversationsCallback): Promise<number> {
+    getBlockedConversations(
+        conversationTypes: Array<RCIMIWConversationType>,
+        channelId: string,
+        callback: IRCIMIWGetBlockedConversationsCallback
+    ): Promise<number> {
+        if (
+            !validate('conversationTypes', conversationTypes, AssertRules.NUMBER_ARRAY, true) ||
+            !validate('channelId', channelId, AssertRules.ONLY_STRING, false)
+        ) {
+            return paramErrorPromise;
+        }
         let resultCallback;
         if (callback) {
             resultCallback = (res: any) => {
@@ -1173,7 +1789,7 @@ export default class RCIMIWEngine {
                     let { code } = res;
                     callback.onError?.({ code });
                 }
-            }
+            };
         }
         return this._invokeMethod('getBlockedConversations', resultCallback, { conversationTypes, channelId });
     }
@@ -1184,11 +1800,25 @@ export default class RCIMIWEngine {
      * @param targetId  会话 ID
      * @param channelId 频道 ID，仅支持超级群使用，其他会话类型传 null 即可。
      * @param top       是否置顶
-     * @param callback  事件回调。SDK 从 5.3.1 版本开始支持 callback 方式回调。从 5.4.0 版本废弃该接口的其他回调方式。如果传入了 callback 参数，仅触发 callback 回调。
+     * @param callback  事件回调。SDK 从 5.3.1 版本开始支持 callback 方式回调。从 5.4.0 版本废弃该接口的其他回调方式，预计将在 6.x 版本删除此其他回调方式。如果传入了 callback 参数，仅触发 callback 回调。
      * @return 当次接口操作的状态码。0 代表调用成功 具体结果需要实现接口回调，非 0 代表当前接口调用操作失败，不会触发接口回调，详细错误参考错误码
      * @listener [onConversationTopStatusChanged]
      */
-    changeConversationTopStatus(type: RCIMIWConversationType, targetId: string, channelId: string, top: boolean, callback: IRCIMIWChangeConversationTopStatusCallback): Promise<number> {
+    changeConversationTopStatus(
+        type: RCIMIWConversationType,
+        targetId: string,
+        channelId: string,
+        top: boolean,
+        callback: IRCIMIWChangeConversationTopStatusCallback
+    ): Promise<number> {
+        if (
+            !validate('type', type, AssertRules.NUMBER, true) ||
+            !validate('targetId', targetId, AssertRules.STRING, true) ||
+            !validate('channelId', channelId, AssertRules.ONLY_STRING, false) ||
+            !validate('top', top, AssertRules.BOOLEAN, true)
+        ) {
+            return paramErrorPromise;
+        }
         let resultCallback;
         if (callback) {
             resultCallback = (res: any) => {
@@ -1196,7 +1826,7 @@ export default class RCIMIWEngine {
                     let { code } = res;
                     callback.onConversationTopStatusChanged?.({ code });
                 }
-            }
+            };
         }
         return this._invokeMethod('changeConversationTopStatus', resultCallback, { type, targetId, channelId, top });
     }
@@ -1208,9 +1838,16 @@ export default class RCIMIWEngine {
      * @param channelId 频道 ID，仅支持超级群使用，其他会话类型传 null 即可。
      * @return 当次接口操作的状态码。0 代表调用成功 具体结果需要实现接口回调，非 0 代表当前接口调用操作失败，不会触发接口回调，详细错误参考错误码
      * @listener [onConversationTopStatusLoaded]
-     * @deprecated 用 {@link #getConversationTopStatus(RCIMIWConversationType, String, String, IRCIMIWGetConversationTopStatusCallback)} 代替
+     * @deprecated 用 {@link #getConversationTopStatus(RCIMIWConversationType, String, String, IRCIMIWGetConversationTopStatusCallback)} 代替， 预计将在 6.x 版本删除此接口。
      */
     loadConversationTopStatus(type: RCIMIWConversationType, targetId: string, channelId: string): Promise<number> {
+        if (
+            !validate('type', type, AssertRules.NUMBER, true) ||
+            !validate('targetId', targetId, AssertRules.STRING, true) ||
+            !validate('channelId', channelId, AssertRules.ONLY_STRING, false)
+        ) {
+            return paramErrorPromise;
+        }
         let resultCallback;
         return this._invokeMethod('loadConversationTopStatus', resultCallback, { type, targetId, channelId });
     }
@@ -1220,11 +1857,23 @@ export default class RCIMIWEngine {
      * @param type      会话类型
      * @param targetId  会话 ID
      * @param channelId 频道 ID，仅支持超级群使用，其他会话类型传 null 即可。
-     * @param callback  事件回调。SDK 从 5.3.1 版本开始支持 callback 方式回调。从 5.4.0 版本废弃该接口的其他回调方式。如果传入了 callback 参数，仅触发 callback 回调。
+     * @param callback  事件回调。SDK 从 5.3.1 版本开始支持 callback 方式回调。从 5.4.0 版本废弃该接口的其他回调方式，预计将在 6.x 版本删除此其他回调方式。如果传入了 callback 参数，仅触发 callback 回调。
      * @return 当次接口操作的状态码。0 代表调用成功 具体结果需要实现接口回调，非 0 代表当前接口调用操作失败，不会触发接口回调，详细错误参考错误码
      * @listener [onConversationTopStatusLoaded]
      */
-    getConversationTopStatus(type: RCIMIWConversationType, targetId: string, channelId: string, callback: IRCIMIWGetConversationTopStatusCallback): Promise<number> {
+    getConversationTopStatus(
+        type: RCIMIWConversationType,
+        targetId: string,
+        channelId: string,
+        callback: IRCIMIWGetConversationTopStatusCallback
+    ): Promise<number> {
+        if (
+            !validate('type', type, AssertRules.NUMBER, true) ||
+            !validate('targetId', targetId, AssertRules.STRING, true) ||
+            !validate('channelId', channelId, AssertRules.ONLY_STRING, false)
+        ) {
+            return paramErrorPromise;
+        }
         let resultCallback;
         if (callback) {
             resultCallback = (res: any) => {
@@ -1236,7 +1885,7 @@ export default class RCIMIWEngine {
                     let { code } = res;
                     callback.onError?.({ code });
                 }
-            }
+            };
         }
         return this._invokeMethod('getConversationTopStatus', resultCallback, { type, targetId, channelId });
     }
@@ -1247,11 +1896,25 @@ export default class RCIMIWEngine {
      * @param targetId  会话 ID
      * @param channelId 频道 ID，仅支持超级群使用，其他会话类型传 null 即可。
      * @param timestamp 会话中已读的最后一条消息的发送时间戳
-     * @param callback  事件回调。SDK 从 5.3.1 版本开始支持 callback 方式回调。从 5.4.0 版本废弃该接口的其他回调方式。如果传入了 callback 参数，仅触发 callback 回调。
+     * @param callback  事件回调。SDK 从 5.3.1 版本开始支持 callback 方式回调。从 5.4.0 版本废弃该接口的其他回调方式，预计将在 6.x 版本删除此其他回调方式。如果传入了 callback 参数，仅触发 callback 回调。
      * @return 当次接口操作的状态码。0 代表调用成功 具体结果需要实现接口回调，非 0 代表当前接口调用操作失败，不会触发接口回调，详细错误参考错误码
      * @listener [onConversationReadStatusSynced]
      */
-    syncConversationReadStatus(type: RCIMIWConversationType, targetId: string, channelId: string, timestamp: number, callback: IRCIMIWSyncConversationReadStatusCallback): Promise<number> {
+    syncConversationReadStatus(
+        type: RCIMIWConversationType,
+        targetId: string,
+        channelId: string,
+        timestamp: number,
+        callback: IRCIMIWSyncConversationReadStatusCallback
+    ): Promise<number> {
+        if (
+            !validate('type', type, AssertRules.NUMBER, true) ||
+            !validate('targetId', targetId, AssertRules.STRING, true) ||
+            !validate('channelId', channelId, AssertRules.ONLY_STRING, false) ||
+            !validate('timestamp', timestamp, AssertRules.NUMBER, true)
+        ) {
+            return paramErrorPromise;
+        }
         let resultCallback;
         if (callback) {
             resultCallback = (res: any) => {
@@ -1259,9 +1922,14 @@ export default class RCIMIWEngine {
                     let { code } = res;
                     callback.onConversationReadStatusSynced?.({ code });
                 }
-            }
+            };
         }
-        return this._invokeMethod('syncConversationReadStatus', resultCallback, { type, targetId, channelId, timestamp });
+        return this._invokeMethod('syncConversationReadStatus', resultCallback, {
+            type,
+            targetId,
+            channelId,
+            timestamp,
+        });
     }
 
     /**
@@ -1272,7 +1940,20 @@ export default class RCIMIWEngine {
      * @param currentType 当前的状态
      * @return 当次接口操作的状态码。0 代表调用成功 具体结果需要实现接口回调，非 0 代表当前接口调用操作失败，不会触发接口回调，详细错误参考错误码
      */
-    sendTypingStatus(type: RCIMIWConversationType, targetId: string, channelId: string, currentType: string): Promise<number> {
+    sendTypingStatus(
+        type: RCIMIWConversationType,
+        targetId: string,
+        channelId: string,
+        currentType: string
+    ): Promise<number> {
+        if (
+            !validate('type', type, AssertRules.NUMBER, true) ||
+            !validate('targetId', targetId, AssertRules.STRING, true) ||
+            !validate('channelId', channelId, AssertRules.ONLY_STRING, false) ||
+            !validate('currentType', currentType, AssertRules.STRING, true)
+        ) {
+            return paramErrorPromise;
+        }
         let resultCallback;
         return this._invokeMethod('sendTypingStatus', resultCallback, { type, targetId, channelId, currentType });
     }
@@ -1288,11 +1969,38 @@ export default class RCIMIWEngine {
      * @param count     获取的消息数量，0 < count <= 20
      * @return 当次接口操作的状态码。0 代表调用成功 具体结果需要实现接口回调，非 0 代表当前接口调用操作失败，不会触发接口回调，详细错误参考错误码
      * @listener [onMessagesLoaded]
-     * @deprecated 用 {@link #getMessages(RCIMIWConversationType, String, String, long, RCIMIWTimeOrder, RCIMIWMessageOperationPolicy, int, IRCIMIWGetMessagesCallback)} 代替
+     * @deprecated 用 {@link #getMessages(RCIMIWConversationType, String, String, long, RCIMIWTimeOrder, RCIMIWMessageOperationPolicy, int, IRCIMIWGetMessagesCallback)} 代替， 预计将在 6.x 版本删除此接口。
      */
-    loadMessages(type: RCIMIWConversationType, targetId: string, channelId: string, sentTime: number, order: RCIMIWTimeOrder, policy: RCIMIWMessageOperationPolicy, count: number): Promise<number> {
+    loadMessages(
+        type: RCIMIWConversationType,
+        targetId: string,
+        channelId: string,
+        sentTime: number,
+        order: RCIMIWTimeOrder,
+        policy: RCIMIWMessageOperationPolicy,
+        count: number
+    ): Promise<number> {
+        if (
+            !validate('type', type, AssertRules.NUMBER, true) ||
+            !validate('targetId', targetId, AssertRules.STRING, true) ||
+            !validate('channelId', channelId, AssertRules.ONLY_STRING, false) ||
+            !validate('sentTime', sentTime, AssertRules.NUMBER, true) ||
+            !validate('order', order, AssertRules.NUMBER, true) ||
+            !validate('policy', policy, AssertRules.NUMBER, true) ||
+            !validate('count', count, AssertRules.NUMBER, true)
+        ) {
+            return paramErrorPromise;
+        }
         let resultCallback;
-        return this._invokeMethod('loadMessages', resultCallback, { type, targetId, channelId, sentTime, order, policy, count });
+        return this._invokeMethod('loadMessages', resultCallback, {
+            type,
+            targetId,
+            channelId,
+            sentTime,
+            order,
+            policy,
+            count,
+        });
     }
 
     /**
@@ -1304,11 +2012,31 @@ export default class RCIMIWEngine {
      * @param order     获取消息的方向。BEFORE：获取 sentTime 之前的消息 （时间递减），AFTER：获取 sentTime 之后的消息 （时间递增）
      * @param policy    消息的加载策略。LOCAL：只加载本地，REMOTE：只加载远端，LOCAL_REMOTE：本地远端都加载
      * @param count     获取的消息数量，0 < count <= 20
-     * @param callback  事件回调。SDK 从 5.3.1 版本开始支持 callback 方式回调。从 5.4.0 版本废弃该接口的其他回调方式。如果传入了 callback 参数，仅触发 callback 回调。
+     * @param callback  事件回调。SDK 从 5.3.1 版本开始支持 callback 方式回调。从 5.4.0 版本废弃该接口的其他回调方式，预计将在 6.x 版本删除此其他回调方式。如果传入了 callback 参数，仅触发 callback 回调。
      * @return 当次接口操作的状态码。0 代表调用成功 具体结果需要实现接口回调，非 0 代表当前接口调用操作失败，不会触发接口回调，详细错误参考错误码
      * @listener [onMessagesLoaded]
      */
-    getMessages(type: RCIMIWConversationType, targetId: string, channelId: string, sentTime: number, order: RCIMIWTimeOrder, policy: RCIMIWMessageOperationPolicy, count: number, callback: IRCIMIWGetMessagesCallback): Promise<number> {
+    getMessages(
+        type: RCIMIWConversationType,
+        targetId: string,
+        channelId: string,
+        sentTime: number,
+        order: RCIMIWTimeOrder,
+        policy: RCIMIWMessageOperationPolicy,
+        count: number,
+        callback: IRCIMIWGetMessagesCallback
+    ): Promise<number> {
+        if (
+            !validate('type', type, AssertRules.NUMBER, true) ||
+            !validate('targetId', targetId, AssertRules.STRING, true) ||
+            !validate('channelId', channelId, AssertRules.ONLY_STRING, false) ||
+            !validate('sentTime', sentTime, AssertRules.NUMBER, true) ||
+            !validate('order', order, AssertRules.NUMBER, true) ||
+            !validate('policy', policy, AssertRules.NUMBER, true) ||
+            !validate('count', count, AssertRules.NUMBER, true)
+        ) {
+            return paramErrorPromise;
+        }
         let resultCallback;
         if (callback) {
             resultCallback = (res: any) => {
@@ -1320,18 +2048,29 @@ export default class RCIMIWEngine {
                     let { code } = res;
                     callback.onError?.({ code });
                 }
-            }
+            };
         }
-        return this._invokeMethod('getMessages', resultCallback, { type, targetId, channelId, sentTime, order, policy, count });
+        return this._invokeMethod('getMessages', resultCallback, {
+            type,
+            targetId,
+            channelId,
+            sentTime,
+            order,
+            policy,
+            count,
+        });
     }
 
     /**
      * 根据消息 id 获取消息体（本地数据库索引唯一值）。
      * @param messageId 消息的 messageId，可在消息对象中获取
-     * @param callback  事件回调。SDK 从 5.3.1 版本开始支持 callback 方式回调。从 5.4.0 版本废弃该接口的其他回调方式。如果传入了 callback 参数，仅触发 callback 回调。
+     * @param callback  事件回调。SDK 从 5.3.1 版本开始支持 callback 方式回调。从 5.4.0 版本废弃该接口的其他回调方式，预计将在 6.x 版本删除此其他回调方式。如果传入了 callback 参数，仅触发 callback 回调。
      * @return 当次接口操作的状态码。0 代表调用成功 具体结果需要实现接口回调，非 0 代表当前接口调用操作失败，不会触发接口回调，详细错误参考错误码
      */
     getMessageById(messageId: number, callback: IRCIMIWGetMessageCallback): Promise<number> {
+        if (!validate('messageId', messageId, AssertRules.NUMBER, true)) {
+            return paramErrorPromise;
+        }
         let resultCallback;
         if (callback) {
             resultCallback = (res: any) => {
@@ -1343,7 +2082,7 @@ export default class RCIMIWEngine {
                     let { code } = res;
                     callback.onError?.({ code });
                 }
-            }
+            };
         }
         return this._invokeMethod('getMessageById', resultCallback, { messageId });
     }
@@ -1351,10 +2090,13 @@ export default class RCIMIWEngine {
     /**
      * 通过全局唯一 id 获取消息实体。
      * @param messageUId 消息的 messageUid，可在消息对象中获取，且只有发送成功的消息才会有值。
-     * @param callback   事件回调。SDK 从 5.3.1 版本开始支持 callback 方式回调。从 5.4.0 版本废弃该接口的其他回调方式。如果传入了 callback 参数，仅触发 callback 回调。
+     * @param callback   事件回调。SDK 从 5.3.1 版本开始支持 callback 方式回调。从 5.4.0 版本废弃该接口的其他回调方式，预计将在 6.x 版本删除此其他回调方式。如果传入了 callback 参数，仅触发 callback 回调。
      * @return 当次接口操作的状态码。0 代表调用成功 具体结果需要实现接口回调，非 0 代表当前接口调用操作失败，不会触发接口回调，详细错误参考错误码
      */
     getMessageByUId(messageUId: string, callback: IRCIMIWGetMessageCallback): Promise<number> {
+        if (!validate('messageUId', messageUId, AssertRules.STRING, true)) {
+            return paramErrorPromise;
+        }
         let resultCallback;
         if (callback) {
             resultCallback = (res: any) => {
@@ -1366,7 +2108,7 @@ export default class RCIMIWEngine {
                     let { code } = res;
                     callback.onError?.({ code });
                 }
-            }
+            };
         }
         return this._invokeMethod('getMessageByUId', resultCallback, { messageUId });
     }
@@ -1378,9 +2120,16 @@ export default class RCIMIWEngine {
      * @param channelId 频道 ID，仅支持超级群使用，其他会话类型传 null 即可。
      * @return 当次接口操作的状态码。0 代表调用成功 具体结果需要实现接口回调，非 0 代表当前接口调用操作失败，不会触发接口回调，详细错误参考错误码
      * @listener [onFirstUnreadMessageLoaded]
-     * @deprecated 用 {@link #getFirstUnreadMessage(RCIMIWConversationType, String, String, IRCIMIWGetFirstUnreadMessageCallback)} 代替
+     * @deprecated 用 {@link #getFirstUnreadMessage(RCIMIWConversationType, String, String, IRCIMIWGetFirstUnreadMessageCallback)} 代替， 预计将在 6.x 版本删除此接口。
      */
     loadFirstUnreadMessage(type: RCIMIWConversationType, targetId: string, channelId: string): Promise<number> {
+        if (
+            !validate('type', type, AssertRules.NUMBER, true) ||
+            !validate('targetId', targetId, AssertRules.STRING, true) ||
+            !validate('channelId', channelId, AssertRules.ONLY_STRING, false)
+        ) {
+            return paramErrorPromise;
+        }
         let resultCallback;
         return this._invokeMethod('loadFirstUnreadMessage', resultCallback, { type, targetId, channelId });
     }
@@ -1390,11 +2139,23 @@ export default class RCIMIWEngine {
      * @param type      会话类型
      * @param targetId  会话 ID
      * @param channelId 频道 ID，仅支持超级群使用，其他会话类型传 null 即可。
-     * @param callback  事件回调。SDK 从 5.3.1 版本开始支持 callback 方式回调。从 5.4.0 版本废弃该接口的其他回调方式。如果传入了 callback 参数，仅触发 callback 回调。
+     * @param callback  事件回调。SDK 从 5.3.1 版本开始支持 callback 方式回调。从 5.4.0 版本废弃该接口的其他回调方式，预计将在 6.x 版本删除此其他回调方式。如果传入了 callback 参数，仅触发 callback 回调。
      * @return 当次接口操作的状态码。0 代表调用成功 具体结果需要实现接口回调，非 0 代表当前接口调用操作失败，不会触发接口回调，详细错误参考错误码
      * @listener [onFirstUnreadMessageLoaded]
      */
-    getFirstUnreadMessage(type: RCIMIWConversationType, targetId: string, channelId: string, callback: IRCIMIWGetFirstUnreadMessageCallback): Promise<number> {
+    getFirstUnreadMessage(
+        type: RCIMIWConversationType,
+        targetId: string,
+        channelId: string,
+        callback: IRCIMIWGetFirstUnreadMessageCallback
+    ): Promise<number> {
+        if (
+            !validate('type', type, AssertRules.NUMBER, true) ||
+            !validate('targetId', targetId, AssertRules.STRING, true) ||
+            !validate('channelId', channelId, AssertRules.ONLY_STRING, false)
+        ) {
+            return paramErrorPromise;
+        }
         let resultCallback;
         if (callback) {
             resultCallback = (res: any) => {
@@ -1406,7 +2167,7 @@ export default class RCIMIWEngine {
                     let { code } = res;
                     callback.onError?.({ code });
                 }
-            }
+            };
         }
         return this._invokeMethod('getFirstUnreadMessage', resultCallback, { type, targetId, channelId });
     }
@@ -1418,9 +2179,16 @@ export default class RCIMIWEngine {
      * @param channelId 频道 ID，仅支持超级群使用，其他会话类型传 null 即可。
      * @return 当次接口操作的状态码。0 代表调用成功 具体结果需要实现接口回调，非 0 代表当前接口调用操作失败，不会触发接口回调，详细错误参考错误码
      * @listener [onUnreadMentionedMessagesLoaded]
-     * @deprecated 用 {@link #getUnreadMentionedMessages(RCIMIWConversationType, String, String, IRCIMIWGetUnreadMentionedMessagesCallback)} 代替
+     * @deprecated 用 {@link #getUnreadMentionedMessages(RCIMIWConversationType, String, String, IRCIMIWGetUnreadMentionedMessagesCallback)} 代替， 预计将在 6.x 版本删除此接口。
      */
     loadUnreadMentionedMessages(type: RCIMIWConversationType, targetId: string, channelId: string): Promise<number> {
+        if (
+            !validate('type', type, AssertRules.NUMBER, true) ||
+            !validate('targetId', targetId, AssertRules.STRING, true) ||
+            !validate('channelId', channelId, AssertRules.ONLY_STRING, false)
+        ) {
+            return paramErrorPromise;
+        }
         let resultCallback;
         return this._invokeMethod('loadUnreadMentionedMessages', resultCallback, { type, targetId, channelId });
     }
@@ -1430,11 +2198,23 @@ export default class RCIMIWEngine {
      * @param type      会话类型
      * @param targetId  会话 ID
      * @param channelId 频道 ID，仅支持超级群使用，其他会话类型传 null 即可。
-     * @param callback  事件回调。SDK 从 5.3.1 版本开始支持 callback 方式回调。从 5.4.0 版本废弃该接口的其他回调方式。如果传入了 callback 参数，仅触发 callback 回调。
+     * @param callback  事件回调。SDK 从 5.3.1 版本开始支持 callback 方式回调。从 5.4.0 版本废弃该接口的其他回调方式，预计将在 6.x 版本删除此其他回调方式。如果传入了 callback 参数，仅触发 callback 回调。
      * @return 当次接口操作的状态码。0 代表调用成功 具体结果需要实现接口回调，非 0 代表当前接口调用操作失败，不会触发接口回调，详细错误参考错误码
      * @listener [onUnreadMentionedMessagesLoaded]
      */
-    getUnreadMentionedMessages(type: RCIMIWConversationType, targetId: string, channelId: string, callback: IRCIMIWGetUnreadMentionedMessagesCallback): Promise<number> {
+    getUnreadMentionedMessages(
+        type: RCIMIWConversationType,
+        targetId: string,
+        channelId: string,
+        callback: IRCIMIWGetUnreadMentionedMessagesCallback
+    ): Promise<number> {
+        if (
+            !validate('type', type, AssertRules.NUMBER, true) ||
+            !validate('targetId', targetId, AssertRules.STRING, true) ||
+            !validate('channelId', channelId, AssertRules.ONLY_STRING, false)
+        ) {
+            return paramErrorPromise;
+        }
         let resultCallback;
         if (callback) {
             resultCallback = (res: any) => {
@@ -1446,7 +2226,7 @@ export default class RCIMIWEngine {
                     let { code } = res;
                     callback.onError?.({ code });
                 }
-            }
+            };
         }
         return this._invokeMethod('getUnreadMentionedMessages', resultCallback, { type, targetId, channelId });
     }
@@ -1454,11 +2234,14 @@ export default class RCIMIWEngine {
     /**
      * 插入一条消息
      * @param message  插入的消息
-     * @param callback 事件回调。SDK 从 5.3.1 版本开始支持 callback 方式回调。从 5.4.0 版本废弃该接口的其他回调方式。如果传入了 callback 参数，仅触发 callback 回调。
+     * @param callback 事件回调。SDK 从 5.3.1 版本开始支持 callback 方式回调。从 5.4.0 版本废弃该接口的其他回调方式，预计将在 6.x 版本删除此其他回调方式。如果传入了 callback 参数，仅触发 callback 回调。
      * @return 当次接口操作的状态码。0 代表调用成功 具体结果需要实现接口回调，非 0 代表当前接口调用操作失败，不会触发接口回调，详细错误参考错误码
      * @listener [onMessageInserted]
      */
     insertMessage(message: RCIMIWMessage, callback: IRCIMIWInsertMessageCallback): Promise<number> {
+        if (!validate('message', message, AssertRules.OBJECT, true)) {
+            return paramErrorPromise;
+        }
         let resultCallback;
         if (callback) {
             resultCallback = (res: any) => {
@@ -1466,7 +2249,7 @@ export default class RCIMIWEngine {
                     let { code, message } = res;
                     callback.onMessageInserted?.({ code, message });
                 }
-            }
+            };
         }
         return this._invokeMethod('insertMessage', resultCallback, { message });
     }
@@ -1474,11 +2257,14 @@ export default class RCIMIWEngine {
     /**
      * 插入多条消息，不支持超级群
      * @param messages 插入的消息集合
-     * @param callback 事件回调。SDK 从 5.3.1 版本开始支持 callback 方式回调。从 5.4.0 版本废弃该接口的其他回调方式。如果传入了 callback 参数，仅触发 callback 回调。
+     * @param callback 事件回调。SDK 从 5.3.1 版本开始支持 callback 方式回调。从 5.4.0 版本废弃该接口的其他回调方式，预计将在 6.x 版本删除此其他回调方式。如果传入了 callback 参数，仅触发 callback 回调。
      * @return 当次接口操作的状态码。0 代表调用成功 具体结果需要实现接口回调，非 0 代表当前接口调用操作失败，不会触发接口回调，详细错误参考错误码
      * @listener [onMessagesInserted]
      */
     insertMessages(messages: Array<RCIMIWMessage>, callback: IRCIMIWInsertMessagesCallback): Promise<number> {
+        if (!validate('messages', messages, AssertRules.ARRAY, true)) {
+            return paramErrorPromise;
+        }
         let resultCallback;
         if (callback) {
             resultCallback = (res: any) => {
@@ -1486,7 +2272,7 @@ export default class RCIMIWEngine {
                     let { code, messages } = res;
                     callback.onMessagesInserted?.({ code, messages });
                 }
-            }
+            };
         }
         return this._invokeMethod('insertMessages', resultCallback, { messages });
     }
@@ -1498,11 +2284,27 @@ export default class RCIMIWEngine {
      * @param channelId 频道 ID，仅支持超级群使用，其他会话类型传 null 即可。
      * @param timestamp 清除消息截止时间戳，0 <= recordTime <= 当前会话最后一条消息的 sentTime, 0 清除所有消息，其他值清除小于等于 recordTime 的消息
      * @param policy    清除的策略
-     * @param callback  事件回调。SDK 从 5.3.1 版本开始支持 callback 方式回调。从 5.4.0 版本废弃该接口的其他回调方式。如果传入了 callback 参数，仅触发 callback 回调。
+     * @param callback  事件回调。SDK 从 5.3.1 版本开始支持 callback 方式回调。从 5.4.0 版本废弃该接口的其他回调方式，预计将在 6.x 版本删除此其他回调方式。如果传入了 callback 参数，仅触发 callback 回调。
      * @return 当次接口操作的状态码。0 代表调用成功 具体结果需要实现接口回调，非 0 代表当前接口调用操作失败，不会触发接口回调，详细错误参考错误码
      * @listener [onMessagesCleared]
      */
-    clearMessages(type: RCIMIWConversationType, targetId: string, channelId: string, timestamp: number, policy: RCIMIWMessageOperationPolicy, callback: IRCIMIWClearMessagesCallback): Promise<number> {
+    clearMessages(
+        type: RCIMIWConversationType,
+        targetId: string,
+        channelId: string,
+        timestamp: number,
+        policy: RCIMIWMessageOperationPolicy,
+        callback: IRCIMIWClearMessagesCallback
+    ): Promise<number> {
+        if (
+            !validate('type', type, AssertRules.NUMBER, true) ||
+            !validate('targetId', targetId, AssertRules.STRING, true) ||
+            !validate('channelId', channelId, AssertRules.ONLY_STRING, false) ||
+            !validate('timestamp', timestamp, AssertRules.NUMBER, true) ||
+            !validate('policy', policy, AssertRules.NUMBER, true)
+        ) {
+            return paramErrorPromise;
+        }
         let resultCallback;
         if (callback) {
             resultCallback = (res: any) => {
@@ -1510,7 +2312,7 @@ export default class RCIMIWEngine {
                     let { code } = res;
                     callback.onMessagesCleared?.({ code });
                 }
-            }
+            };
         }
         return this._invokeMethod('clearMessages', resultCallback, { type, targetId, channelId, timestamp, policy });
     }
@@ -1518,11 +2320,14 @@ export default class RCIMIWEngine {
     /**
      * 删除本地消息
      * @param messages 消息集合
-     * @param callback 事件回调。SDK 从 5.3.1 版本开始支持 callback 方式回调。从 5.4.0 版本废弃该接口的其他回调方式。如果传入了 callback 参数，仅触发 callback 回调。
+     * @param callback 事件回调。SDK 从 5.3.1 版本开始支持 callback 方式回调。从 5.4.0 版本废弃该接口的其他回调方式，预计将在 6.x 版本删除此其他回调方式。如果传入了 callback 参数，仅触发 callback 回调。
      * @return 当次接口操作的状态码。0 代表调用成功 具体结果需要实现接口回调，非 0 代表当前接口调用操作失败，不会触发接口回调，详细错误参考错误码
      * @listener [onLocalMessagesDeleted]
      */
     deleteLocalMessages(messages: Array<RCIMIWMessage>, callback: IRCIMIWDeleteLocalMessagesCallback): Promise<number> {
+        if (!validate('messages', messages, AssertRules.ARRAY, true)) {
+            return paramErrorPromise;
+        }
         let resultCallback;
         if (callback) {
             resultCallback = (res: any) => {
@@ -1530,7 +2335,7 @@ export default class RCIMIWEngine {
                     let { code, messages } = res;
                     callback.onLocalMessagesDeleted?.({ code, messages });
                 }
-            }
+            };
         }
         return this._invokeMethod('deleteLocalMessages', resultCallback, { messages });
     }
@@ -1541,11 +2346,25 @@ export default class RCIMIWEngine {
      * @param targetId  会话 ID
      * @param channelId 频道 ID，仅支持超级群使用，其他会话类型传 null 即可。
      * @param messages  消息集合
-     * @param callback  事件回调。SDK 从 5.3.1 版本开始支持 callback 方式回调。从 5.4.0 版本废弃该接口的其他回调方式。如果传入了 callback 参数，仅触发 callback 回调。
+     * @param callback  事件回调。SDK 从 5.3.1 版本开始支持 callback 方式回调。从 5.4.0 版本废弃该接口的其他回调方式，预计将在 6.x 版本删除此其他回调方式。如果传入了 callback 参数，仅触发 callback 回调。
      * @return 当次接口操作的状态码。0 代表调用成功 具体结果需要实现接口回调，非 0 代表当前接口调用操作失败，不会触发接口回调，详细错误参考错误码
      * @listener [onMessagesDeleted]
      */
-    deleteMessages(type: RCIMIWConversationType, targetId: string, channelId: string, messages: Array<RCIMIWMessage>, callback: IRCIMIWDeleteMessagesCallback): Promise<number> {
+    deleteMessages(
+        type: RCIMIWConversationType,
+        targetId: string,
+        channelId: string,
+        messages: Array<RCIMIWMessage>,
+        callback: IRCIMIWDeleteMessagesCallback
+    ): Promise<number> {
+        if (
+            !validate('type', type, AssertRules.NUMBER, true) ||
+            !validate('targetId', targetId, AssertRules.STRING, true) ||
+            !validate('channelId', channelId, AssertRules.ONLY_STRING, false) ||
+            !validate('messages', messages, AssertRules.ARRAY, true)
+        ) {
+            return paramErrorPromise;
+        }
         let resultCallback;
         if (callback) {
             resultCallback = (res: any) => {
@@ -1553,7 +2372,7 @@ export default class RCIMIWEngine {
                     let { code, messages } = res;
                     callback.onMessagesDeleted?.({ code, messages });
                 }
-            }
+            };
         }
         return this._invokeMethod('deleteMessages', resultCallback, { type, targetId, channelId, messages });
     }
@@ -1561,11 +2380,14 @@ export default class RCIMIWEngine {
     /**
      * 撤回消息
      * @param message  需要被撤回的消息
-     * @param callback 事件回调。SDK 从 5.3.1 版本开始支持 callback 方式回调。从 5.4.0 版本废弃该接口的其他回调方式。如果传入了 callback 参数，仅触发 callback 回调。
+     * @param callback 事件回调。SDK 从 5.3.1 版本开始支持 callback 方式回调。从 5.4.0 版本废弃该接口的其他回调方式，预计将在 6.x 版本删除此其他回调方式。如果传入了 callback 参数，仅触发 callback 回调。
      * @return 当次接口操作的状态码。0 代表调用成功 具体结果需要实现接口回调，非 0 代表当前接口调用操作失败，不会触发接口回调，详细错误参考错误码
      * @listener [onMessageRecalled]
      */
     recallMessage(message: RCIMIWMessage, callback: IRCIMIWRecallMessageCallback): Promise<number> {
+        if (!validate('message', message, AssertRules.OBJECT, true)) {
+            return paramErrorPromise;
+        }
         let resultCallback;
         if (callback) {
             resultCallback = (res: any) => {
@@ -1573,7 +2395,7 @@ export default class RCIMIWEngine {
                     let { code, message } = res;
                     callback.onMessageRecalled?.({ code, message });
                 }
-            }
+            };
         }
         return this._invokeMethod('recallMessage', resultCallback, { message });
     }
@@ -1583,11 +2405,23 @@ export default class RCIMIWEngine {
      * @param targetId  会话 ID
      * @param channelId 频道 ID，仅支持超级群使用，其他会话类型传 null 即可。
      * @param timestamp 该会话中已读的最后一条消息的发送时间戳
-     * @param callback  事件回调。SDK 从 5.3.1 版本开始支持 callback 方式回调。从 5.4.0 版本废弃该接口的其他回调方式。如果传入了 callback 参数，仅触发 callback 回调。
+     * @param callback  事件回调。SDK 从 5.3.1 版本开始支持 callback 方式回调。从 5.4.0 版本废弃该接口的其他回调方式，预计将在 6.x 版本删除此其他回调方式。如果传入了 callback 参数，仅触发 callback 回调。
      * @return 当次接口操作的状态码。0 代表调用成功 具体结果需要实现接口回调，非 0 代表当前接口调用操作失败，不会触发接口回调，详细错误参考错误码
      * @listener [onPrivateReadReceiptMessageSent]
      */
-    sendPrivateReadReceiptMessage(targetId: string, channelId: string, timestamp: number, callback: IRCIMIWSendPrivateReadReceiptMessageCallback): Promise<number> {
+    sendPrivateReadReceiptMessage(
+        targetId: string,
+        channelId: string,
+        timestamp: number,
+        callback: IRCIMIWSendPrivateReadReceiptMessageCallback
+    ): Promise<number> {
+        if (
+            !validate('targetId', targetId, AssertRules.STRING, true) ||
+            !validate('channelId', channelId, AssertRules.ONLY_STRING, false) ||
+            !validate('timestamp', timestamp, AssertRules.NUMBER, true)
+        ) {
+            return paramErrorPromise;
+        }
         let resultCallback;
         if (callback) {
             resultCallback = (res: any) => {
@@ -1595,7 +2429,7 @@ export default class RCIMIWEngine {
                     let { code } = res;
                     callback.onPrivateReadReceiptMessageSent?.({ code });
                 }
-            }
+            };
         }
         return this._invokeMethod('sendPrivateReadReceiptMessage', resultCallback, { targetId, channelId, timestamp });
     }
@@ -1603,11 +2437,17 @@ export default class RCIMIWEngine {
     /**
      * 发起群聊消息已读回执请求
      * @param message  需要请求已读回执的消息
-     * @param callback 事件回调。SDK 从 5.3.1 版本开始支持 callback 方式回调。从 5.4.0 版本废弃该接口的其他回调方式。如果传入了 callback 参数，仅触发 callback 回调。
+     * @param callback 事件回调。SDK 从 5.3.1 版本开始支持 callback 方式回调。从 5.4.0 版本废弃该接口的其他回调方式，预计将在 6.x 版本删除此其他回调方式。如果传入了 callback 参数，仅触发 callback 回调。
      * @return 当次接口操作的状态码。0 代表调用成功 具体结果需要实现接口回调，非 0 代表当前接口调用操作失败，不会触发接口回调，详细错误参考错误码
      * @listener [onGroupReadReceiptRequestSent]
      */
-    sendGroupReadReceiptRequest(message: RCIMIWMessage, callback: IRCIMIWSendGroupReadReceiptRequestCallback): Promise<number> {
+    sendGroupReadReceiptRequest(
+        message: RCIMIWMessage,
+        callback: IRCIMIWSendGroupReadReceiptRequestCallback
+    ): Promise<number> {
+        if (!validate('message', message, AssertRules.OBJECT, true)) {
+            return paramErrorPromise;
+        }
         let resultCallback;
         if (callback) {
             resultCallback = (res: any) => {
@@ -1615,7 +2455,7 @@ export default class RCIMIWEngine {
                     let { code, message } = res;
                     callback.onGroupReadReceiptRequestSent?.({ code, message });
                 }
-            }
+            };
         }
         return this._invokeMethod('sendGroupReadReceiptRequest', resultCallback, { message });
     }
@@ -1625,11 +2465,23 @@ export default class RCIMIWEngine {
      * @param targetId  会话 ID
      * @param channelId 频道 ID，仅支持超级群使用，其他会话类型传 null 即可。
      * @param messages  会话中需要发送已读回执的消息列表
-     * @param callback  事件回调。SDK 从 5.3.1 版本开始支持 callback 方式回调。从 5.4.0 版本废弃该接口的其他回调方式。如果传入了 callback 参数，仅触发 callback 回调。
+     * @param callback  事件回调。SDK 从 5.3.1 版本开始支持 callback 方式回调。从 5.4.0 版本废弃该接口的其他回调方式，预计将在 6.x 版本删除此其他回调方式。如果传入了 callback 参数，仅触发 callback 回调。
      * @return 当次接口操作的状态码。0 代表调用成功 具体结果需要实现接口回调，非 0 代表当前接口调用操作失败，不会触发接口回调，详细错误参考错误码
      * @listener [onGroupReadReceiptResponseSent]
      */
-    sendGroupReadReceiptResponse(targetId: string, channelId: string, messages: Array<RCIMIWMessage>, callback: IRCIMIWSendGroupReadReceiptResponseCallback): Promise<number> {
+    sendGroupReadReceiptResponse(
+        targetId: string,
+        channelId: string,
+        messages: Array<RCIMIWMessage>,
+        callback: IRCIMIWSendGroupReadReceiptResponseCallback
+    ): Promise<number> {
+        if (
+            !validate('targetId', targetId, AssertRules.STRING, true) ||
+            !validate('channelId', channelId, AssertRules.ONLY_STRING, false) ||
+            !validate('messages', messages, AssertRules.ARRAY, true)
+        ) {
+            return paramErrorPromise;
+        }
         let resultCallback;
         if (callback) {
             resultCallback = (res: any) => {
@@ -1637,7 +2489,7 @@ export default class RCIMIWEngine {
                     let { code, message } = res;
                     callback.onGroupReadReceiptResponseSent?.({ code, message });
                 }
-            }
+            };
         }
         return this._invokeMethod('sendGroupReadReceiptResponse', resultCallback, { targetId, channelId, messages });
     }
@@ -1647,11 +2499,18 @@ export default class RCIMIWEngine {
      * 每条消息携带扩展信息键值对最大值 300个，单次设置扩展信息键值对最大值 20个
      * @param messageUId 消息的 messageUid，可在消息对象中获取，且只有发送成功的消息才会有值
      * @param expansion  要更新的消息扩展信息键值对，类型是 HashMap；Key 支持大小写英文字母、数字、部分特殊符号 + = - _ 的组合方式，不支持汉字。Value 可以输入空格
-     * @param callback   事件回调。SDK 从 5.3.1 版本开始支持 callback 方式回调。从 5.4.0 版本废弃该接口的其他回调方式。如果传入了 callback 参数，仅触发 callback 回调。
+     * @param callback   事件回调。SDK 从 5.3.1 版本开始支持 callback 方式回调。从 5.4.0 版本废弃该接口的其他回调方式，预计将在 6.x 版本删除此其他回调方式。如果传入了 callback 参数，仅触发 callback 回调。
      * @return 当次接口操作的状态码。0 代表调用成功 具体结果需要实现接口回调，非 0 代表当前接口调用操作失败，不会触发接口回调，详细错误参考错误码
      * @listener [onMessageExpansionUpdated]
      */
-    updateMessageExpansion(messageUId: string, expansion: { [propName: string]: string }, callback: IRCIMIWUpdateMessageExpansionCallback): Promise<number> {
+    updateMessageExpansion(
+        messageUId: string,
+        expansion: { [propName: string]: string },
+        callback: IRCIMIWUpdateMessageExpansionCallback
+    ): Promise<number> {
+        if (!validate('messageUId', messageUId, AssertRules.STRING, true)) {
+            return paramErrorPromise;
+        }
         let resultCallback;
         if (callback) {
             resultCallback = (res: any) => {
@@ -1659,7 +2518,7 @@ export default class RCIMIWEngine {
                     let { code } = res;
                     callback.onMessageExpansionUpdated?.({ code });
                 }
-            }
+            };
         }
         return this._invokeMethod('updateMessageExpansion', resultCallback, { messageUId, expansion });
     }
@@ -1668,11 +2527,21 @@ export default class RCIMIWEngine {
      * 删除消息扩展信息中特定的键值对
      * @param messageUId 消息的 messageUid，可在消息对象中获取，且只有发送成功的消息才会有值
      * @param keys       消息扩展信息中待删除的 key 的列表，类型是 ArrayList
-     * @param callback   事件回调。SDK 从 5.3.1 版本开始支持 callback 方式回调。从 5.4.0 版本废弃该接口的其他回调方式。如果传入了 callback 参数，仅触发 callback 回调。
+     * @param callback   事件回调。SDK 从 5.3.1 版本开始支持 callback 方式回调。从 5.4.0 版本废弃该接口的其他回调方式，预计将在 6.x 版本删除此其他回调方式。如果传入了 callback 参数，仅触发 callback 回调。
      * @return 当次接口操作的状态码。0 代表调用成功 具体结果需要实现接口回调，非 0 代表当前接口调用操作失败，不会触发接口回调，详细错误参考错误码
      * @listener [onMessageExpansionForKeysRemoved]
      */
-    removeMessageExpansionForKeys(messageUId: string, keys: Array<string>, callback: IRCIMIWRemoveMessageExpansionForKeysCallback): Promise<number> {
+    removeMessageExpansionForKeys(
+        messageUId: string,
+        keys: Array<string>,
+        callback: IRCIMIWRemoveMessageExpansionForKeysCallback
+    ): Promise<number> {
+        if (
+            !validate('messageUId', messageUId, AssertRules.STRING, true) ||
+            !validate('keys', keys, AssertRules.ARRAY, true)
+        ) {
+            return paramErrorPromise;
+        }
         let resultCallback;
         if (callback) {
             resultCallback = (res: any) => {
@@ -1680,7 +2549,7 @@ export default class RCIMIWEngine {
                     let { code } = res;
                     callback.onMessageExpansionForKeysRemoved?.({ code });
                 }
-            }
+            };
         }
         return this._invokeMethod('removeMessageExpansionForKeys', resultCallback, { messageUId, keys });
     }
@@ -1689,11 +2558,21 @@ export default class RCIMIWEngine {
      * 设置消息发送状态。
      * @param messageId  消息的 messageId，可在消息对象中获取
      * @param sentStatus 要修改的状态
-     * @param callback   事件回调。SDK 从 5.3.1 版本开始支持 callback 方式回调。从 5.4.0 版本废弃该接口的其他回调方式。如果传入了 callback 参数，仅触发 callback 回调。
+     * @param callback   事件回调。SDK 从 5.3.1 版本开始支持 callback 方式回调。从 5.4.0 版本废弃该接口的其他回调方式，预计将在 6.x 版本删除此其他回调方式。如果传入了 callback 参数，仅触发 callback 回调。
      * @return 当次接口操作的状态码。0 代表调用成功 具体结果需要实现接口回调，非 0 代表当前接口调用操作失败，不会触发接口回调，详细错误参考错误码
      * @listener [onMessageSentStatusChanged]
      */
-    changeMessageSentStatus(messageId: number, sentStatus: RCIMIWSentStatus, callback: IRCIMIWChangeMessageSentStatusCallback): Promise<number> {
+    changeMessageSentStatus(
+        messageId: number,
+        sentStatus: RCIMIWSentStatus,
+        callback: IRCIMIWChangeMessageSentStatusCallback
+    ): Promise<number> {
+        if (
+            !validate('messageId', messageId, AssertRules.NUMBER, true) ||
+            !validate('sentStatus', sentStatus, AssertRules.NUMBER, true)
+        ) {
+            return paramErrorPromise;
+        }
         let resultCallback;
         if (callback) {
             resultCallback = (res: any) => {
@@ -1701,7 +2580,7 @@ export default class RCIMIWEngine {
                     let { code } = res;
                     callback.onMessageSentStatusChanged?.({ code });
                 }
-            }
+            };
         }
         return this._invokeMethod('changeMessageSentStatus', resultCallback, { messageId, sentStatus });
     }
@@ -1710,11 +2589,21 @@ export default class RCIMIWEngine {
      * 设置消息接收状态。
      * @param messageId      消息的 messageId，可在消息对象中获取
      * @param receivedStatus 要修改的状态
-     * @param callback       事件回调。SDK 从 5.3.1 版本开始支持 callback 方式回调。从 5.4.0 版本废弃该接口的其他回调方式。如果传入了 callback 参数，仅触发 callback 回调。
+     * @param callback       事件回调。SDK 从 5.3.1 版本开始支持 callback 方式回调。从 5.4.0 版本废弃该接口的其他回调方式，预计将在 6.x 版本删除此其他回调方式。如果传入了 callback 参数，仅触发 callback 回调。
      * @return 当次接口操作的状态码。0 代表调用成功 具体结果需要实现接口回调，非 0 代表当前接口调用操作失败，不会触发接口回调，详细错误参考错误码
      * @listener [onMessageReceiveStatusChanged]
      */
-    changeMessageReceiveStatus(messageId: number, receivedStatus: RCIMIWReceivedStatus, callback: IRCIMIWChangeMessageReceivedStatusCallback): Promise<number> {
+    changeMessageReceiveStatus(
+        messageId: number,
+        receivedStatus: RCIMIWReceivedStatus,
+        callback: IRCIMIWChangeMessageReceivedStatusCallback
+    ): Promise<number> {
+        if (
+            !validate('messageId', messageId, AssertRules.NUMBER, true) ||
+            !validate('receivedStatus', receivedStatus, AssertRules.NUMBER, true)
+        ) {
+            return paramErrorPromise;
+        }
         let resultCallback;
         if (callback) {
             resultCallback = (res: any) => {
@@ -1722,7 +2611,7 @@ export default class RCIMIWEngine {
                     let { code } = res;
                     callback.onMessageReceiveStatusChanged?.({ code });
                 }
-            }
+            };
         }
         return this._invokeMethod('changeMessageReceiveStatus', resultCallback, { messageId, receivedStatus });
     }
@@ -1732,11 +2621,23 @@ export default class RCIMIWEngine {
      * @param targetId     聊天室会话 ID
      * @param messageCount 进入聊天室拉取消息数目，-1 时不拉取任何消息，0 时拉取 10 条消息，最多只能拉取 50
      * @param autoCreate   是否创建聊天室，TRUE 如果聊天室不存在，sdk 会创建聊天室并加入，如果已存在，则直接加入
-     * @param callback     事件回调。SDK 从 5.3.1 版本开始支持 callback 方式回调。从 5.4.0 版本废弃该接口的其他回调方式。如果传入了 callback 参数，仅触发 callback 回调。
+     * @param callback     事件回调。SDK 从 5.3.1 版本开始支持 callback 方式回调。从 5.4.0 版本废弃该接口的其他回调方式，预计将在 6.x 版本删除此其他回调方式。如果传入了 callback 参数，仅触发 callback 回调。
      * @return 当次接口操作的状态码。0 代表调用成功 具体结果需要实现接口回调，非 0 代表当前接口调用操作失败，不会触发接口回调，详细错误参考错误码
      * @listener [onChatRoomJoined]
      */
-    joinChatRoom(targetId: string, messageCount: number, autoCreate: boolean, callback: IRCIMIWJoinChatRoomCallback): Promise<number> {
+    joinChatRoom(
+        targetId: string,
+        messageCount: number,
+        autoCreate: boolean,
+        callback: IRCIMIWJoinChatRoomCallback
+    ): Promise<number> {
+        if (
+            !validate('targetId', targetId, AssertRules.STRING, true) ||
+            !validate('messageCount', messageCount, AssertRules.NUMBER, true) ||
+            !validate('autoCreate', autoCreate, AssertRules.BOOLEAN, true)
+        ) {
+            return paramErrorPromise;
+        }
         let resultCallback;
         if (callback) {
             resultCallback = (res: any) => {
@@ -1744,7 +2645,7 @@ export default class RCIMIWEngine {
                     let { code, targetId } = res;
                     callback.onChatRoomJoined?.({ code, targetId });
                 }
-            }
+            };
         }
         return this._invokeMethod('joinChatRoom', resultCallback, { targetId, messageCount, autoCreate });
     }
@@ -1752,11 +2653,14 @@ export default class RCIMIWEngine {
     /**
      * 退出聊天室。
      * @param targetId 聊天室会话 ID
-     * @param callback 事件回调。SDK 从 5.3.1 版本开始支持 callback 方式回调。从 5.4.0 版本废弃该接口的其他回调方式。如果传入了 callback 参数，仅触发 callback 回调。
+     * @param callback 事件回调。SDK 从 5.3.1 版本开始支持 callback 方式回调。从 5.4.0 版本废弃该接口的其他回调方式，预计将在 6.x 版本删除此其他回调方式。如果传入了 callback 参数，仅触发 callback 回调。
      * @return 当次接口操作的状态码。0 代表调用成功 具体结果需要实现接口回调，非 0 代表当前接口调用操作失败，不会触发接口回调，详细错误参考错误码
      * @listener [onChatRoomLeft]
      */
     leaveChatRoom(targetId: string, callback: IRCIMIWLeaveChatRoomCallback): Promise<number> {
+        if (!validate('targetId', targetId, AssertRules.STRING, true)) {
+            return paramErrorPromise;
+        }
         let resultCallback;
         if (callback) {
             resultCallback = (res: any) => {
@@ -1764,7 +2668,7 @@ export default class RCIMIWEngine {
                     let { code, targetId } = res;
                     callback.onChatRoomLeft?.({ code, targetId });
                 }
-            }
+            };
         }
         return this._invokeMethod('leaveChatRoom', resultCallback, { targetId });
     }
@@ -1778,9 +2682,17 @@ export default class RCIMIWEngine {
      * @param count     要获取的消息数量，0 < count <= 50。
      * @return 当次接口操作的状态码。0 代表调用成功 具体结果需要实现接口回调，非 0 代表当前接口调用操作失败，不会触发接口回调，详细错误参考错误码
      * @listener [onChatRoomMessagesLoaded]
-     * @deprecated 用 {@link #getChatRoomMessages(String, long, RCIMIWTimeOrder, int, IRCIMIWGetChatRoomMessagesCallback)} 代替
+     * @deprecated 用 {@link #getChatRoomMessages(String, long, RCIMIWTimeOrder, int, IRCIMIWGetChatRoomMessagesCallback)} 代替， 预计将在 6.x 版本删除此接口。
      */
     loadChatRoomMessages(targetId: string, timestamp: number, order: RCIMIWTimeOrder, count: number): Promise<number> {
+        if (
+            !validate('targetId', targetId, AssertRules.STRING, true) ||
+            !validate('timestamp', timestamp, AssertRules.NUMBER, true) ||
+            !validate('order', order, AssertRules.NUMBER, true) ||
+            !validate('count', count, AssertRules.NUMBER, true)
+        ) {
+            return paramErrorPromise;
+        }
         let resultCallback;
         return this._invokeMethod('loadChatRoomMessages', resultCallback, { targetId, timestamp, order, count });
     }
@@ -1792,11 +2704,25 @@ export default class RCIMIWEngine {
      * @param timestamp 起始的消息发送时间戳
      * @param order     拉取顺序 0:倒序，1:正序
      * @param count     要获取的消息数量，0 < count <= 50。
-     * @param callback  事件回调。SDK 从 5.3.1 版本开始支持 callback 方式回调。从 5.4.0 版本废弃该接口的其他回调方式。如果传入了 callback 参数，仅触发 callback 回调。
+     * @param callback  事件回调。SDK 从 5.3.1 版本开始支持 callback 方式回调。从 5.4.0 版本废弃该接口的其他回调方式，预计将在 6.x 版本删除此其他回调方式。如果传入了 callback 参数，仅触发 callback 回调。
      * @return 当次接口操作的状态码。0 代表调用成功 具体结果需要实现接口回调，非 0 代表当前接口调用操作失败，不会触发接口回调，详细错误参考错误码
      * @listener [onChatRoomMessagesLoaded]
      */
-    getChatRoomMessages(targetId: string, timestamp: number, order: RCIMIWTimeOrder, count: number, callback: IRCIMIWGetChatRoomMessagesCallback): Promise<number> {
+    getChatRoomMessages(
+        targetId: string,
+        timestamp: number,
+        order: RCIMIWTimeOrder,
+        count: number,
+        callback: IRCIMIWGetChatRoomMessagesCallback
+    ): Promise<number> {
+        if (
+            !validate('targetId', targetId, AssertRules.STRING, true) ||
+            !validate('timestamp', timestamp, AssertRules.NUMBER, true) ||
+            !validate('order', order, AssertRules.NUMBER, true) ||
+            !validate('count', count, AssertRules.NUMBER, true)
+        ) {
+            return paramErrorPromise;
+        }
         let resultCallback;
         if (callback) {
             resultCallback = (res: any) => {
@@ -1808,7 +2734,7 @@ export default class RCIMIWEngine {
                     let { code } = res;
                     callback.onError?.({ code });
                 }
-            }
+            };
         }
         return this._invokeMethod('getChatRoomMessages', resultCallback, { targetId, timestamp, order, count });
     }
@@ -1820,11 +2746,27 @@ export default class RCIMIWEngine {
      * @param value          聊天室属性对应的值，最大长度 4096 个字符
      * @param deleteWhenLeft 用户掉线或退出时，是否自动删除该 Key、Value 值
      * @param overwrite      如果当前 key 存在，是否进行覆盖
-     * @param callback       事件回调。SDK 从 5.3.1 版本开始支持 callback 方式回调。从 5.4.0 版本废弃该接口的其他回调方式。如果传入了 callback 参数，仅触发 callback 回调。
+     * @param callback       事件回调。SDK 从 5.3.1 版本开始支持 callback 方式回调。从 5.4.0 版本废弃该接口的其他回调方式，预计将在 6.x 版本删除此其他回调方式。如果传入了 callback 参数，仅触发 callback 回调。
      * @return 当次接口操作的状态码。0 代表调用成功 具体结果需要实现接口回调，非 0 代表当前接口调用操作失败，不会触发接口回调，详细错误参考错误码
      * @listener [onChatRoomEntryAdded]
      */
-    addChatRoomEntry(targetId: string, key: string, value: string, deleteWhenLeft: boolean, overwrite: boolean, callback: IRCIMIWAddChatRoomEntryCallback): Promise<number> {
+    addChatRoomEntry(
+        targetId: string,
+        key: string,
+        value: string,
+        deleteWhenLeft: boolean,
+        overwrite: boolean,
+        callback: IRCIMIWAddChatRoomEntryCallback
+    ): Promise<number> {
+        if (
+            !validate('targetId', targetId, AssertRules.STRING, true) ||
+            !validate('key', key, AssertRules.STRING, true) ||
+            !validate('value', value, AssertRules.STRING, true) ||
+            !validate('deleteWhenLeft', deleteWhenLeft, AssertRules.BOOLEAN, true) ||
+            !validate('overwrite', overwrite, AssertRules.BOOLEAN, true)
+        ) {
+            return paramErrorPromise;
+        }
         let resultCallback;
         if (callback) {
             resultCallback = (res: any) => {
@@ -1832,9 +2774,15 @@ export default class RCIMIWEngine {
                     let { code } = res;
                     callback.onChatRoomEntryAdded?.({ code });
                 }
-            }
+            };
         }
-        return this._invokeMethod('addChatRoomEntry', resultCallback, { targetId, key, value, deleteWhenLeft, overwrite });
+        return this._invokeMethod('addChatRoomEntry', resultCallback, {
+            targetId,
+            key,
+            value,
+            deleteWhenLeft,
+            overwrite,
+        });
     }
 
     /**
@@ -1843,11 +2791,24 @@ export default class RCIMIWEngine {
      * @param entries        聊天室属性
      * @param deleteWhenLeft 用户掉线或退出时，是否自动删除该 Key、Value 值
      * @param overwrite      是否强制覆盖
-     * @param callback       事件回调。SDK 从 5.3.1 版本开始支持 callback 方式回调。从 5.4.0 版本废弃该接口的其他回调方式。如果传入了 callback 参数，仅触发 callback 回调。
+     * @param callback       事件回调。SDK 从 5.3.1 版本开始支持 callback 方式回调。从 5.4.0 版本废弃该接口的其他回调方式，预计将在 6.x 版本删除此其他回调方式。如果传入了 callback 参数，仅触发 callback 回调。
      * @return 当次接口操作的状态码。0 代表调用成功 具体结果需要实现接口回调，非 0 代表当前接口调用操作失败，不会触发接口回调，详细错误参考错误码
      * @listener [onChatRoomEntriesAdded]
      */
-    addChatRoomEntries(targetId: string, entries: { [propName: string]: string }, deleteWhenLeft: boolean, overwrite: boolean, callback: IRCIMIWAddChatRoomEntriesCallback): Promise<number> {
+    addChatRoomEntries(
+        targetId: string,
+        entries: { [propName: string]: string },
+        deleteWhenLeft: boolean,
+        overwrite: boolean,
+        callback: IRCIMIWAddChatRoomEntriesCallback
+    ): Promise<number> {
+        if (
+            !validate('targetId', targetId, AssertRules.STRING, true) ||
+            !validate('deleteWhenLeft', deleteWhenLeft, AssertRules.BOOLEAN, true) ||
+            !validate('overwrite', overwrite, AssertRules.BOOLEAN, true)
+        ) {
+            return paramErrorPromise;
+        }
         let resultCallback;
         if (callback) {
             resultCallback = (res: any) => {
@@ -1855,9 +2816,14 @@ export default class RCIMIWEngine {
                     let { code, errors } = res;
                     callback.onChatRoomEntriesAdded?.({ code, errors });
                 }
-            }
+            };
         }
-        return this._invokeMethod('addChatRoomEntries', resultCallback, { targetId, entries, deleteWhenLeft, overwrite });
+        return this._invokeMethod('addChatRoomEntries', resultCallback, {
+            targetId,
+            entries,
+            deleteWhenLeft,
+            overwrite,
+        });
     }
 
     /**
@@ -1866,9 +2832,15 @@ export default class RCIMIWEngine {
      * @param key      聊天室属性键值
      * @return 当次接口操作的状态码。0 代表调用成功 具体结果需要实现接口回调，非 0 代表当前接口调用操作失败，不会触发接口回调，详细错误参考错误码
      * @listener [onChatRoomEntryLoaded]
-     * @deprecated 用 {@link #getChatRoomEntry(String, String, IRCIMIWGetChatRoomEntryCallback)} 代替
+     * @deprecated 用 {@link #getChatRoomEntry(String, String, IRCIMIWGetChatRoomEntryCallback)} 代替， 预计将在 6.x 版本删除此接口。
      */
     loadChatRoomEntry(targetId: string, key: string): Promise<number> {
+        if (
+            !validate('targetId', targetId, AssertRules.STRING, true) ||
+            !validate('key', key, AssertRules.STRING, true)
+        ) {
+            return paramErrorPromise;
+        }
         let resultCallback;
         return this._invokeMethod('loadChatRoomEntry', resultCallback, { targetId, key });
     }
@@ -1877,11 +2849,17 @@ export default class RCIMIWEngine {
      * 获取聊天室单个属性。
      * @param targetId 聊天室会话 ID
      * @param key      聊天室属性键值
-     * @param callback 事件回调。SDK 从 5.3.1 版本开始支持 callback 方式回调。从 5.4.0 版本废弃该接口的其他回调方式。如果传入了 callback 参数，仅触发 callback 回调。
+     * @param callback 事件回调。SDK 从 5.3.1 版本开始支持 callback 方式回调。从 5.4.0 版本废弃该接口的其他回调方式，预计将在 6.x 版本删除此其他回调方式。如果传入了 callback 参数，仅触发 callback 回调。
      * @return 当次接口操作的状态码。0 代表调用成功 具体结果需要实现接口回调，非 0 代表当前接口调用操作失败，不会触发接口回调，详细错误参考错误码
      * @listener [onChatRoomEntryLoaded]
      */
     getChatRoomEntry(targetId: string, key: string, callback: IRCIMIWGetChatRoomEntryCallback): Promise<number> {
+        if (
+            !validate('targetId', targetId, AssertRules.STRING, true) ||
+            !validate('key', key, AssertRules.STRING, true)
+        ) {
+            return paramErrorPromise;
+        }
         let resultCallback;
         if (callback) {
             resultCallback = (res: any) => {
@@ -1893,7 +2871,7 @@ export default class RCIMIWEngine {
                     let { code } = res;
                     callback.onError?.({ code });
                 }
-            }
+            };
         }
         return this._invokeMethod('getChatRoomEntry', resultCallback, { targetId, key });
     }
@@ -1903,9 +2881,12 @@ export default class RCIMIWEngine {
      * @param targetId 聊天室会话 ID
      * @return 当次接口操作的状态码。0 代表调用成功 具体结果需要实现接口回调，非 0 代表当前接口调用操作失败，不会触发接口回调，详细错误参考错误码
      * @listener [onChatRoomAllEntriesLoaded]
-     * @deprecated 用 {@link #getChatRoomAllEntries(String, IRCIMIWGetChatRoomAllEntriesCallback)} 代替
+     * @deprecated 用 {@link #getChatRoomAllEntries(String, IRCIMIWGetChatRoomAllEntriesCallback)} 代替， 预计将在 6.x 版本删除此接口。
      */
     loadChatRoomAllEntries(targetId: string): Promise<number> {
+        if (!validate('targetId', targetId, AssertRules.STRING, true)) {
+            return paramErrorPromise;
+        }
         let resultCallback;
         return this._invokeMethod('loadChatRoomAllEntries', resultCallback, { targetId });
     }
@@ -1913,11 +2894,14 @@ export default class RCIMIWEngine {
     /**
      * 获取聊天室所有属性。
      * @param targetId 聊天室会话 ID
-     * @param callback 事件回调。SDK 从 5.3.1 版本开始支持 callback 方式回调。从 5.4.0 版本废弃该接口的其他回调方式。如果传入了 callback 参数，仅触发 callback 回调。
+     * @param callback 事件回调。SDK 从 5.3.1 版本开始支持 callback 方式回调。从 5.4.0 版本废弃该接口的其他回调方式，预计将在 6.x 版本删除此其他回调方式。如果传入了 callback 参数，仅触发 callback 回调。
      * @return 当次接口操作的状态码。0 代表调用成功 具体结果需要实现接口回调，非 0 代表当前接口调用操作失败，不会触发接口回调，详细错误参考错误码
      * @listener [onChatRoomAllEntriesLoaded]
      */
     getChatRoomAllEntries(targetId: string, callback: IRCIMIWGetChatRoomAllEntriesCallback): Promise<number> {
+        if (!validate('targetId', targetId, AssertRules.STRING, true)) {
+            return paramErrorPromise;
+        }
         let resultCallback;
         if (callback) {
             resultCallback = (res: any) => {
@@ -1929,7 +2913,7 @@ export default class RCIMIWEngine {
                     let { code } = res;
                     callback.onError?.({ code });
                 }
-            }
+            };
         }
         return this._invokeMethod('getChatRoomAllEntries', resultCallback, { targetId });
     }
@@ -1939,11 +2923,23 @@ export default class RCIMIWEngine {
      * @param targetId 聊天室会话 ID
      * @param key      聊天室属性键值
      * @param force    是否强制删除
-     * @param callback 事件回调。SDK 从 5.3.1 版本开始支持 callback 方式回调。从 5.4.0 版本废弃该接口的其他回调方式。如果传入了 callback 参数，仅触发 callback 回调。
+     * @param callback 事件回调。SDK 从 5.3.1 版本开始支持 callback 方式回调。从 5.4.0 版本废弃该接口的其他回调方式，预计将在 6.x 版本删除此其他回调方式。如果传入了 callback 参数，仅触发 callback 回调。
      * @return 当次接口操作的状态码。0 代表调用成功 具体结果需要实现接口回调，非 0 代表当前接口调用操作失败，不会触发接口回调，详细错误参考错误码
      * @listener [onChatRoomEntryRemoved]
      */
-    removeChatRoomEntry(targetId: string, key: string, force: boolean, callback: IRCIMIWRemoveChatRoomEntryCallback): Promise<number> {
+    removeChatRoomEntry(
+        targetId: string,
+        key: string,
+        force: boolean,
+        callback: IRCIMIWRemoveChatRoomEntryCallback
+    ): Promise<number> {
+        if (
+            !validate('targetId', targetId, AssertRules.STRING, true) ||
+            !validate('key', key, AssertRules.STRING, true) ||
+            !validate('force', force, AssertRules.BOOLEAN, true)
+        ) {
+            return paramErrorPromise;
+        }
         let resultCallback;
         if (callback) {
             resultCallback = (res: any) => {
@@ -1951,7 +2947,7 @@ export default class RCIMIWEngine {
                     let { code } = res;
                     callback.onChatRoomEntryRemoved?.({ code });
                 }
-            }
+            };
         }
         return this._invokeMethod('removeChatRoomEntry', resultCallback, { targetId, key, force });
     }
@@ -1961,11 +2957,23 @@ export default class RCIMIWEngine {
      * @param targetId 聊天室会话 ID
      * @param keys     聊天室属性
      * @param force    是否强制覆盖
-     * @param callback 事件回调。SDK 从 5.3.1 版本开始支持 callback 方式回调。从 5.4.0 版本废弃该接口的其他回调方式。如果传入了 callback 参数，仅触发 callback 回调。
+     * @param callback 事件回调。SDK 从 5.3.1 版本开始支持 callback 方式回调。从 5.4.0 版本废弃该接口的其他回调方式，预计将在 6.x 版本删除此其他回调方式。如果传入了 callback 参数，仅触发 callback 回调。
      * @return 当次接口操作的状态码。0 代表调用成功 具体结果需要实现接口回调，非 0 代表当前接口调用操作失败，不会触发接口回调，详细错误参考错误码
      * @listener [onChatRoomEntriesRemoved]
      */
-    removeChatRoomEntries(targetId: string, keys: Array<string>, force: boolean, callback: IRCIMIWRemoveChatRoomEntriesCallback): Promise<number> {
+    removeChatRoomEntries(
+        targetId: string,
+        keys: Array<string>,
+        force: boolean,
+        callback: IRCIMIWRemoveChatRoomEntriesCallback
+    ): Promise<number> {
+        if (
+            !validate('targetId', targetId, AssertRules.STRING, true) ||
+            !validate('keys', keys, AssertRules.ARRAY, true) ||
+            !validate('force', force, AssertRules.BOOLEAN, true)
+        ) {
+            return paramErrorPromise;
+        }
         let resultCallback;
         if (callback) {
             resultCallback = (res: any) => {
@@ -1973,7 +2981,7 @@ export default class RCIMIWEngine {
                     let { code } = res;
                     callback.onChatRoomEntriesRemoved?.({ code });
                 }
-            }
+            };
         }
         return this._invokeMethod('removeChatRoomEntries', resultCallback, { targetId, keys, force });
     }
@@ -1982,11 +2990,14 @@ export default class RCIMIWEngine {
      * 将某个用户加入黑名单。
      * 当你把对方加入黑名单后，对方再发消息时，就会提示“已被加入黑名单，消息发送失败”。 但你依然可以发消息个对方。
      * @param userId   用户 Id
-     * @param callback 事件回调。SDK 从 5.3.1 版本开始支持 callback 方式回调。从 5.4.0 版本废弃该接口的其他回调方式。如果传入了 callback 参数，仅触发 callback 回调。
+     * @param callback 事件回调。SDK 从 5.3.1 版本开始支持 callback 方式回调。从 5.4.0 版本废弃该接口的其他回调方式，预计将在 6.x 版本删除此其他回调方式。如果传入了 callback 参数，仅触发 callback 回调。
      * @return 当次接口操作的状态码。0 代表调用成功 具体结果需要实现接口回调，非 0 代表当前接口调用操作失败，不会触发接口回调，详细错误参考错误码
      * @listener [onBlacklistAdded]
      */
     addToBlacklist(userId: string, callback: IRCIMIWAddToBlacklistCallback): Promise<number> {
+        if (!validate('userId', userId, AssertRules.STRING, true)) {
+            return paramErrorPromise;
+        }
         let resultCallback;
         if (callback) {
             resultCallback = (res: any) => {
@@ -1994,7 +3005,7 @@ export default class RCIMIWEngine {
                     let { code, userId } = res;
                     callback.onBlacklistAdded?.({ code, userId });
                 }
-            }
+            };
         }
         return this._invokeMethod('addToBlacklist', resultCallback, { userId });
     }
@@ -2002,11 +3013,14 @@ export default class RCIMIWEngine {
     /**
      * 将某个用户从黑名单中移出。
      * @param userId   用户 Id
-     * @param callback 事件回调。SDK 从 5.3.1 版本开始支持 callback 方式回调。从 5.4.0 版本废弃该接口的其他回调方式。如果传入了 callback 参数，仅触发 callback 回调。
+     * @param callback 事件回调。SDK 从 5.3.1 版本开始支持 callback 方式回调。从 5.4.0 版本废弃该接口的其他回调方式，预计将在 6.x 版本删除此其他回调方式。如果传入了 callback 参数，仅触发 callback 回调。
      * @return 当次接口操作的状态码。0 代表调用成功 具体结果需要实现接口回调，非 0 代表当前接口调用操作失败，不会触发接口回调，详细错误参考错误码
      * @listener [onBlacklistRemoved]
      */
     removeFromBlacklist(userId: string, callback: IRCIMIWRemoveFromBlacklistCallback): Promise<number> {
+        if (!validate('userId', userId, AssertRules.STRING, true)) {
+            return paramErrorPromise;
+        }
         let resultCallback;
         if (callback) {
             resultCallback = (res: any) => {
@@ -2014,7 +3028,7 @@ export default class RCIMIWEngine {
                     let { code, userId } = res;
                     callback.onBlacklistRemoved?.({ code, userId });
                 }
-            }
+            };
         }
         return this._invokeMethod('removeFromBlacklist', resultCallback, { userId });
     }
@@ -2024,9 +3038,12 @@ export default class RCIMIWEngine {
      * @param userId 用户 Id
      * @return 当次接口操作的状态码。0 代表调用成功 具体结果需要实现接口回调，非 0 代表当前接口调用操作失败，不会触发接口回调，详细错误参考错误码
      * @listener [onBlacklistStatusLoaded]
-     * @deprecated 用 {@link #getBlacklistStatus(String, IRCIMIWGetBlacklistStatusCallback)} 代替
+     * @deprecated 用 {@link #getBlacklistStatus(String, IRCIMIWGetBlacklistStatusCallback)} 代替， 预计将在 6.x 版本删除此接口。
      */
     loadBlacklistStatus(userId: string): Promise<number> {
+        if (!validate('userId', userId, AssertRules.STRING, true)) {
+            return paramErrorPromise;
+        }
         let resultCallback;
         return this._invokeMethod('loadBlacklistStatus', resultCallback, { userId });
     }
@@ -2034,11 +3051,14 @@ export default class RCIMIWEngine {
     /**
      * 获取某用户是否在黑名单中。
      * @param userId   用户 Id
-     * @param callback 事件回调。SDK 从 5.3.1 版本开始支持 callback 方式回调。从 5.4.0 版本废弃该接口的其他回调方式。如果传入了 callback 参数，仅触发 callback 回调。
+     * @param callback 事件回调。SDK 从 5.3.1 版本开始支持 callback 方式回调。从 5.4.0 版本废弃该接口的其他回调方式，预计将在 6.x 版本删除此其他回调方式。如果传入了 callback 参数，仅触发 callback 回调。
      * @return 当次接口操作的状态码。0 代表调用成功 具体结果需要实现接口回调，非 0 代表当前接口调用操作失败，不会触发接口回调，详细错误参考错误码
      * @listener [onBlacklistStatusLoaded]
      */
     getBlacklistStatus(userId: string, callback: IRCIMIWGetBlacklistStatusCallback): Promise<number> {
+        if (!validate('userId', userId, AssertRules.STRING, true)) {
+            return paramErrorPromise;
+        }
         let resultCallback;
         if (callback) {
             resultCallback = (res: any) => {
@@ -2050,7 +3070,7 @@ export default class RCIMIWEngine {
                     let { code } = res;
                     callback.onError?.({ code });
                 }
-            }
+            };
         }
         return this._invokeMethod('getBlacklistStatus', resultCallback, { userId });
     }
@@ -2059,7 +3079,7 @@ export default class RCIMIWEngine {
      * 加载当前用户设置的黑名单列表。
      * @return 当次接口操作的状态码。0 代表调用成功 具体结果需要实现接口回调，非 0 代表当前接口调用操作失败，不会触发接口回调，详细错误参考错误码
      * @listener [onBlacklistLoaded]
-     * @deprecated 用 {@link #getBlacklist(IRCIMIWGetBlacklistCallback)} 代替
+     * @deprecated 用 {@link #getBlacklist(IRCIMIWGetBlacklistCallback)} 代替， 预计将在 6.x 版本删除此接口。
      */
     loadBlacklist(): Promise<number> {
         let resultCallback;
@@ -2068,7 +3088,7 @@ export default class RCIMIWEngine {
 
     /**
      * 获取当前用户设置的黑名单列表。
-     * @param callback 事件回调。SDK 从 5.3.1 版本开始支持 callback 方式回调。从 5.4.0 版本废弃该接口的其他回调方式。如果传入了 callback 参数，仅触发 callback 回调。
+     * @param callback 事件回调。SDK 从 5.3.1 版本开始支持 callback 方式回调。从 5.4.0 版本废弃该接口的其他回调方式，预计将在 6.x 版本删除此其他回调方式。如果传入了 callback 参数，仅触发 callback 回调。
      * @return 当次接口操作的状态码。0 代表调用成功 具体结果需要实现接口回调，非 0 代表当前接口调用操作失败，不会触发接口回调，详细错误参考错误码
      * @listener [onBlacklistLoaded]
      */
@@ -2084,7 +3104,7 @@ export default class RCIMIWEngine {
                     let { code } = res;
                     callback.onError?.({ code });
                 }
-            }
+            };
         }
         return this._invokeMethod('getBlacklist', resultCallback, {});
     }
@@ -2097,11 +3117,29 @@ export default class RCIMIWEngine {
      * @param keyword   搜索的关键字
      * @param startTime 查询 beginTime 之前的消息， 传 0 时从最新消息开始搜索，从该时间往前搜索。
      * @param count     查询的数量，0 < count <= 50。
-     * @param callback  事件回调。SDK 从 5.3.1 版本开始支持 callback 方式回调。从 5.4.0 版本废弃该接口的其他回调方式。如果传入了 callback 参数，仅触发 callback 回调。
+     * @param callback  事件回调。SDK 从 5.3.1 版本开始支持 callback 方式回调。从 5.4.0 版本废弃该接口的其他回调方式，预计将在 6.x 版本删除此其他回调方式。如果传入了 callback 参数，仅触发 callback 回调。
      * @return 当次接口操作的状态码。0 代表调用成功 具体结果需要实现接口回调，非 0 代表当前接口调用操作失败，不会触发接口回调，详细错误参考错误码
      * @listener [onMessagesSearched]
      */
-    searchMessages(type: RCIMIWConversationType, targetId: string, channelId: string, keyword: string, startTime: number, count: number, callback: IRCIMIWSearchMessagesCallback): Promise<number> {
+    searchMessages(
+        type: RCIMIWConversationType,
+        targetId: string,
+        channelId: string,
+        keyword: string,
+        startTime: number,
+        count: number,
+        callback: IRCIMIWSearchMessagesCallback
+    ): Promise<number> {
+        if (
+            !validate('type', type, AssertRules.NUMBER, true) ||
+            !validate('targetId', targetId, AssertRules.STRING, true) ||
+            !validate('channelId', channelId, AssertRules.ONLY_STRING, false) ||
+            !validate('keyword', keyword, AssertRules.STRING, true) ||
+            !validate('startTime', startTime, AssertRules.NUMBER, true) ||
+            !validate('count', count, AssertRules.NUMBER, true)
+        ) {
+            return paramErrorPromise;
+        }
         let resultCallback;
         if (callback) {
             resultCallback = (res: any) => {
@@ -2113,9 +3151,16 @@ export default class RCIMIWEngine {
                     let { code } = res;
                     callback.onError?.({ code });
                 }
-            }
+            };
         }
-        return this._invokeMethod('searchMessages', resultCallback, { type, targetId, channelId, keyword, startTime, count });
+        return this._invokeMethod('searchMessages', resultCallback, {
+            type,
+            targetId,
+            channelId,
+            keyword,
+            startTime,
+            count,
+        });
     }
 
     /**
@@ -2128,11 +3173,33 @@ export default class RCIMIWEngine {
      * @param endTime   结束时间
      * @param offset    偏移量
      * @param count     返回的搜索结果数量，0 < count <= 50。
-     * @param callback  事件回调。SDK 从 5.3.1 版本开始支持 callback 方式回调。从 5.4.0 版本废弃该接口的其他回调方式。如果传入了 callback 参数，仅触发 callback 回调。
+     * @param callback  事件回调。SDK 从 5.3.1 版本开始支持 callback 方式回调。从 5.4.0 版本废弃该接口的其他回调方式，预计将在 6.x 版本删除此其他回调方式。如果传入了 callback 参数，仅触发 callback 回调。
      * @return 当次接口操作的状态码。0 代表调用成功 具体结果需要实现接口回调，非 0 代表当前接口调用操作失败，不会触发接口回调，详细错误参考错误码
      * @listener [onMessagesSearchedByTimeRange]
      */
-    searchMessagesByTimeRange(type: RCIMIWConversationType, targetId: string, channelId: string, keyword: string, startTime: number, endTime: number, offset: number, count: number, callback: IRCIMIWSearchMessagesByTimeRangeCallback): Promise<number> {
+    searchMessagesByTimeRange(
+        type: RCIMIWConversationType,
+        targetId: string,
+        channelId: string,
+        keyword: string,
+        startTime: number,
+        endTime: number,
+        offset: number,
+        count: number,
+        callback: IRCIMIWSearchMessagesByTimeRangeCallback
+    ): Promise<number> {
+        if (
+            !validate('type', type, AssertRules.NUMBER, true) ||
+            !validate('targetId', targetId, AssertRules.STRING, true) ||
+            !validate('channelId', channelId, AssertRules.ONLY_STRING, false) ||
+            !validate('keyword', keyword, AssertRules.STRING, true) ||
+            !validate('startTime', startTime, AssertRules.NUMBER, true) ||
+            !validate('endTime', endTime, AssertRules.NUMBER, true) ||
+            !validate('offset', offset, AssertRules.NUMBER, true) ||
+            !validate('count', count, AssertRules.NUMBER, true)
+        ) {
+            return paramErrorPromise;
+        }
         let resultCallback;
         if (callback) {
             resultCallback = (res: any) => {
@@ -2144,9 +3211,18 @@ export default class RCIMIWEngine {
                     let { code } = res;
                     callback.onError?.({ code });
                 }
-            }
+            };
         }
-        return this._invokeMethod('searchMessagesByTimeRange', resultCallback, { type, targetId, channelId, keyword, startTime, endTime, offset, count });
+        return this._invokeMethod('searchMessagesByTimeRange', resultCallback, {
+            type,
+            targetId,
+            channelId,
+            keyword,
+            startTime,
+            endTime,
+            offset,
+            count,
+        });
     }
 
     /**
@@ -2157,11 +3233,29 @@ export default class RCIMIWEngine {
      * @param channelId 频道 ID，仅支持超级群使用，其他会话类型传 null 即可。
      * @param startTime 查询记录的起始时间， 传 0 时从最新消息开始搜索，从该时间往前搜索。
      * @param count     返回的搜索结果数量 0 < count <= 50。
-     * @param callback  事件回调。SDK 从 5.3.1 版本开始支持 callback 方式回调。从 5.4.0 版本废弃该接口的其他回调方式。如果传入了 callback 参数，仅触发 callback 回调。
+     * @param callback  事件回调。SDK 从 5.3.1 版本开始支持 callback 方式回调。从 5.4.0 版本废弃该接口的其他回调方式，预计将在 6.x 版本删除此其他回调方式。如果传入了 callback 参数，仅触发 callback 回调。
      * @return 当次接口操作的状态码。0 代表调用成功 具体结果需要实现接口回调，非 0 代表当前接口调用操作失败，不会触发接口回调，详细错误参考错误码
      * @listener [onMessagesSearchedByUserId]
      */
-    searchMessagesByUserId(userId: string, type: RCIMIWConversationType, targetId: string, channelId: string, startTime: number, count: number, callback: IRCIMIWSearchMessagesByUserIdCallback): Promise<number> {
+    searchMessagesByUserId(
+        userId: string,
+        type: RCIMIWConversationType,
+        targetId: string,
+        channelId: string,
+        startTime: number,
+        count: number,
+        callback: IRCIMIWSearchMessagesByUserIdCallback
+    ): Promise<number> {
+        if (
+            !validate('userId', userId, AssertRules.STRING, true) ||
+            !validate('type', type, AssertRules.NUMBER, true) ||
+            !validate('targetId', targetId, AssertRules.STRING, true) ||
+            !validate('channelId', channelId, AssertRules.ONLY_STRING, false) ||
+            !validate('startTime', startTime, AssertRules.NUMBER, true) ||
+            !validate('count', count, AssertRules.NUMBER, true)
+        ) {
+            return paramErrorPromise;
+        }
         let resultCallback;
         if (callback) {
             resultCallback = (res: any) => {
@@ -2173,9 +3267,16 @@ export default class RCIMIWEngine {
                     let { code } = res;
                     callback.onError?.({ code });
                 }
-            }
+            };
         }
-        return this._invokeMethod('searchMessagesByUserId', resultCallback, { userId, type, targetId, channelId, startTime, count });
+        return this._invokeMethod('searchMessagesByUserId', resultCallback, {
+            userId,
+            type,
+            targetId,
+            channelId,
+            startTime,
+            count,
+        });
     }
 
     /**
@@ -2184,11 +3285,25 @@ export default class RCIMIWEngine {
      * @param channelId         频道 ID，仅支持超级群使用，其他会话类型传 null 即可。
      * @param messageTypes      搜索的消息类型
      * @param keyword           搜索的关键字。
-     * @param callback          事件回调。SDK 从 5.3.1 版本开始支持 callback 方式回调。从 5.4.0 版本废弃该接口的其他回调方式。如果传入了 callback 参数，仅触发 callback 回调。
+     * @param callback          事件回调。SDK 从 5.3.1 版本开始支持 callback 方式回调。从 5.4.0 版本废弃该接口的其他回调方式，预计将在 6.x 版本删除此其他回调方式。如果传入了 callback 参数，仅触发 callback 回调。
      * @return 当次接口操作的状态码。0 代表调用成功 具体结果需要实现接口回调，非 0 代表当前接口调用操作失败，不会触发接口回调，详细错误参考错误码
      * @listener [onConversationsSearched]
      */
-    searchConversations(conversationTypes: Array<RCIMIWConversationType>, channelId: string, messageTypes: Array<RCIMIWMessageType>, keyword: string, callback: IRCIMIWSearchConversationsCallback): Promise<number> {
+    searchConversations(
+        conversationTypes: Array<RCIMIWConversationType>,
+        channelId: string,
+        messageTypes: Array<RCIMIWMessageType>,
+        keyword: string,
+        callback: IRCIMIWSearchConversationsCallback
+    ): Promise<number> {
+        if (
+            !validate('conversationTypes', conversationTypes, AssertRules.NUMBER_ARRAY, true) ||
+            !validate('channelId', channelId, AssertRules.ONLY_STRING, false) ||
+            !validate('messageTypes', messageTypes, AssertRules.NUMBER_ARRAY, true) ||
+            !validate('keyword', keyword, AssertRules.STRING, true)
+        ) {
+            return paramErrorPromise;
+        }
         let resultCallback;
         if (callback) {
             resultCallback = (res: any) => {
@@ -2200,9 +3315,14 @@ export default class RCIMIWEngine {
                     let { code } = res;
                     callback.onError?.({ code });
                 }
-            }
+            };
         }
-        return this._invokeMethod('searchConversations', resultCallback, { conversationTypes, channelId, messageTypes, keyword });
+        return this._invokeMethod('searchConversations', resultCallback, {
+            conversationTypes,
+            channelId,
+            messageTypes,
+            keyword,
+        });
     }
 
     /**
@@ -2210,11 +3330,23 @@ export default class RCIMIWEngine {
      * @param startTime   开始消息免打扰时间，格式为 HH:MM:SS
      * @param spanMinutes 需要消息免打扰分钟数，0 < spanMinutes < 1440（ 比如，您设置的起始时间是 00：00， 结束时间为 01:00，则 spanMinutes 为 60 分钟。设置为 1439 代表全天免打扰 （23  60 + 59 = 1439 ））
      * @param level       消息通知级别
-     * @param callback    事件回调。SDK 从 5.3.1 版本开始支持 callback 方式回调。从 5.4.0 版本废弃该接口的其他回调方式。如果传入了 callback 参数，仅触发 callback 回调。
+     * @param callback    事件回调。SDK 从 5.3.1 版本开始支持 callback 方式回调。从 5.4.0 版本废弃该接口的其他回调方式，预计将在 6.x 版本删除此其他回调方式。如果传入了 callback 参数，仅触发 callback 回调。
      * @return 当次接口操作的状态码。0 代表调用成功 具体结果需要实现接口回调，非 0 代表当前接口调用操作失败，不会触发接口回调，详细错误参考错误码
      * @listener [onNotificationQuietHoursChanged]
      */
-    changeNotificationQuietHours(startTime: string, spanMinutes: number, level: RCIMIWPushNotificationQuietHoursLevel, callback: IRCIMIWChangeNotificationQuietHoursCallback): Promise<number> {
+    changeNotificationQuietHours(
+        startTime: string,
+        spanMinutes: number,
+        level: RCIMIWPushNotificationQuietHoursLevel,
+        callback: IRCIMIWChangeNotificationQuietHoursCallback
+    ): Promise<number> {
+        if (
+            !validate('startTime', startTime, AssertRules.STRING, true) ||
+            !validate('spanMinutes', spanMinutes, AssertRules.NUMBER, true) ||
+            !validate('level', level, AssertRules.NUMBER, true)
+        ) {
+            return paramErrorPromise;
+        }
         let resultCallback;
         if (callback) {
             resultCallback = (res: any) => {
@@ -2222,14 +3354,14 @@ export default class RCIMIWEngine {
                     let { code } = res;
                     callback.onNotificationQuietHoursChanged?.({ code });
                 }
-            }
+            };
         }
         return this._invokeMethod('changeNotificationQuietHours', resultCallback, { startTime, spanMinutes, level });
     }
 
     /**
      * 删除已设置的全局时间段消息提醒屏蔽
-     * @param callback 事件回调。SDK 从 5.3.1 版本开始支持 callback 方式回调。从 5.4.0 版本废弃该接口的其他回调方式。如果传入了 callback 参数，仅触发 callback 回调。
+     * @param callback 事件回调。SDK 从 5.3.1 版本开始支持 callback 方式回调。从 5.4.0 版本废弃该接口的其他回调方式，预计将在 6.x 版本删除此其他回调方式。如果传入了 callback 参数，仅触发 callback 回调。
      * @return 当次接口操作的状态码。0 代表调用成功 具体结果需要实现接口回调，非 0 代表当前接口调用操作失败，不会触发接口回调，详细错误参考错误码
      * @listener [onNotificationQuietHoursRemoved]
      */
@@ -2241,7 +3373,7 @@ export default class RCIMIWEngine {
                     let { code } = res;
                     callback.onNotificationQuietHoursRemoved?.({ code });
                 }
-            }
+            };
         }
         return this._invokeMethod('removeNotificationQuietHours', resultCallback, {});
     }
@@ -2250,7 +3382,7 @@ export default class RCIMIWEngine {
      * 加载已设置的时间段消息提醒屏蔽
      * @return 当次接口操作的状态码。0 代表调用成功 具体结果需要实现接口回调，非 0 代表当前接口调用操作失败，不会触发接口回调，详细错误参考错误码
      * @listener [onNotificationQuietHoursLoaded]
-     * @deprecated 用 {@link #getNotificationQuietHours(IRCIMIWGetNotificationQuietHoursCallback)} 代替
+     * @deprecated 用 {@link #getNotificationQuietHours(IRCIMIWGetNotificationQuietHoursCallback)} 代替， 预计将在 6.x 版本删除此接口。
      */
     loadNotificationQuietHours(): Promise<number> {
         let resultCallback;
@@ -2259,7 +3391,7 @@ export default class RCIMIWEngine {
 
     /**
      * 获取已设置的时间段消息提醒屏蔽
-     * @param callback 事件回调。SDK 从 5.3.1 版本开始支持 callback 方式回调。从 5.4.0 版本废弃该接口的其他回调方式。如果传入了 callback 参数，仅触发 callback 回调。
+     * @param callback 事件回调。SDK 从 5.3.1 版本开始支持 callback 方式回调。从 5.4.0 版本废弃该接口的其他回调方式，预计将在 6.x 版本删除此其他回调方式。如果传入了 callback 参数，仅触发 callback 回调。
      * @return 当次接口操作的状态码。0 代表调用成功 具体结果需要实现接口回调，非 0 代表当前接口调用操作失败，不会触发接口回调，详细错误参考错误码
      * @listener [onNotificationQuietHoursLoaded]
      */
@@ -2275,7 +3407,7 @@ export default class RCIMIWEngine {
                     let { code } = res;
                     callback.onError?.({ code });
                 }
-            }
+            };
         }
         return this._invokeMethod('getNotificationQuietHours', resultCallback, {});
     }
@@ -2287,11 +3419,25 @@ export default class RCIMIWEngine {
      * @param targetId  会话 ID
      * @param channelId 超级群的会话频道 ID。其他类型传 null 即可。<ul><li>如果传入频道 ID，则针对该指定频道设置消息免打扰级别。如果不指定频道 ID，则对所有超级群消息生效。</li><li>*注意*：2022.09.01 之前开通超级群业务的客户，如果不指定频道 ID，则默认传 "" 空字符串，即仅针对指定超级群会话（`targetId`）中*不属于任何频道的消息*设置免打扰状态级别。如需修改请提交工单。</p></li></ul>
      * @param level     消息通知级别
-     * @param callback  事件回调。SDK 从 5.3.1 版本开始支持 callback 方式回调。从 5.4.0 版本废弃该接口的其他回调方式。如果传入了 callback 参数，仅触发 callback 回调。
+     * @param callback  事件回调。SDK 从 5.3.1 版本开始支持 callback 方式回调。从 5.4.0 版本废弃该接口的其他回调方式，预计将在 6.x 版本删除此其他回调方式。如果传入了 callback 参数，仅触发 callback 回调。
      * @return 当次接口操作的状态码。0 代表调用成功 具体结果需要实现接口回调，非 0 代表当前接口调用操作失败，不会触发接口回调，详细错误参考错误码
      * @listener [onConversationNotificationLevelChanged]
      */
-    changeConversationNotificationLevel(type: RCIMIWConversationType, targetId: string, channelId: string, level: RCIMIWPushNotificationLevel, callback: IRCIMIWChangeConversationNotificationLevelCallback): Promise<number> {
+    changeConversationNotificationLevel(
+        type: RCIMIWConversationType,
+        targetId: string,
+        channelId: string,
+        level: RCIMIWPushNotificationLevel,
+        callback: IRCIMIWChangeConversationNotificationLevelCallback
+    ): Promise<number> {
+        if (
+            !validate('type', type, AssertRules.NUMBER, true) ||
+            !validate('targetId', targetId, AssertRules.STRING, true) ||
+            !validate('channelId', channelId, AssertRules.ONLY_STRING, false) ||
+            !validate('level', level, AssertRules.NUMBER, true)
+        ) {
+            return paramErrorPromise;
+        }
         let resultCallback;
         if (callback) {
             resultCallback = (res: any) => {
@@ -2299,9 +3445,14 @@ export default class RCIMIWEngine {
                     let { code } = res;
                     callback.onConversationNotificationLevelChanged?.({ code });
                 }
-            }
+            };
         }
-        return this._invokeMethod('changeConversationNotificationLevel', resultCallback, { type, targetId, channelId, level });
+        return this._invokeMethod('changeConversationNotificationLevel', resultCallback, {
+            type,
+            targetId,
+            channelId,
+            level,
+        });
     }
 
     /**
@@ -2311,9 +3462,20 @@ export default class RCIMIWEngine {
      * @param channelId 频道 ID，仅支持超级群使用，其他会话类型传 null 即可。
      * @return 当次接口操作的状态码。0 代表调用成功 具体结果需要实现接口回调，非 0 代表当前接口调用操作失败，不会触发接口回调，详细错误参考错误码
      * @listener [onConversationNotificationLevelLoaded]
-     * @deprecated 用 {@link #getConversationNotificationLevel(RCIMIWConversationType, String, String, IRCIMIWGetConversationNotificationLevelCallback)} 代替
+     * @deprecated 用 {@link #getConversationNotificationLevel(RCIMIWConversationType, String, String, IRCIMIWGetConversationNotificationLevelCallback)} 代替， 预计将在 6.x 版本删除此接口。
      */
-    loadConversationNotificationLevel(type: RCIMIWConversationType, targetId: string, channelId: string): Promise<number> {
+    loadConversationNotificationLevel(
+        type: RCIMIWConversationType,
+        targetId: string,
+        channelId: string
+    ): Promise<number> {
+        if (
+            !validate('type', type, AssertRules.NUMBER, true) ||
+            !validate('targetId', targetId, AssertRules.STRING, true) ||
+            !validate('channelId', channelId, AssertRules.ONLY_STRING, false)
+        ) {
+            return paramErrorPromise;
+        }
         let resultCallback;
         return this._invokeMethod('loadConversationNotificationLevel', resultCallback, { type, targetId, channelId });
     }
@@ -2323,11 +3485,23 @@ export default class RCIMIWEngine {
      * @param type      会话类型。请注意以下限制：<ul><li>*超级群会话类型*：如在 2022.09.01 之前开通超级群业务，默认不支持为单个超级群会话*所有消息*设置免打扰级别（“所有消息”指所有频道中的消息和不属于任何频道的消息）。该接口仅设置指定超级群会话（`targetId`）中*不属于任何频道的消息*的免打扰状态级别。如需修改请提交工单。</li><li>*聊天室会话类型*：不支持，因为聊天室消息默认不支持消息推送提醒。</li></ul>
      * @param targetId  会话 ID
      * @param channelId 超级群的会话频道 ID。其他类型传 null 即可。<ul><li>如果传入频道 ID，则针对该指定频道设置消息免打扰级别。如果不指定频道 ID，则对所有超级群消息生效。</li><li>*注意*：2022.09.01 之前开通超级群业务的客户，如果不指定频道 ID，则默认传 "" 空字符串，即仅针对指定超级群会话（`targetId`）中*不属于任何频道的消息*设置免打扰状态级别。如需修改请提交工单。</p></li></ul>
-     * @param callback  事件回调。SDK 从 5.3.1 版本开始支持 callback 方式回调。从 5.4.0 版本废弃该接口的其他回调方式。如果传入了 callback 参数，仅触发 callback 回调。
+     * @param callback  事件回调。SDK 从 5.3.1 版本开始支持 callback 方式回调。从 5.4.0 版本废弃该接口的其他回调方式，预计将在 6.x 版本删除此其他回调方式。如果传入了 callback 参数，仅触发 callback 回调。
      * @return 当次接口操作的状态码。0 代表调用成功 具体结果需要实现接口回调，非 0 代表当前接口调用操作失败，不会触发接口回调，详细错误参考错误码
      * @listener [onConversationNotificationLevelLoaded]
      */
-    getConversationNotificationLevel(type: RCIMIWConversationType, targetId: string, channelId: string, callback: IRCIMIWGetConversationNotificationLevelCallback): Promise<number> {
+    getConversationNotificationLevel(
+        type: RCIMIWConversationType,
+        targetId: string,
+        channelId: string,
+        callback: IRCIMIWGetConversationNotificationLevelCallback
+    ): Promise<number> {
+        if (
+            !validate('type', type, AssertRules.NUMBER, true) ||
+            !validate('targetId', targetId, AssertRules.STRING, true) ||
+            !validate('channelId', channelId, AssertRules.ONLY_STRING, false)
+        ) {
+            return paramErrorPromise;
+        }
         let resultCallback;
         if (callback) {
             resultCallback = (res: any) => {
@@ -2339,7 +3513,7 @@ export default class RCIMIWEngine {
                     let { code } = res;
                     callback.onError?.({ code });
                 }
-            }
+            };
         }
         return this._invokeMethod('getConversationNotificationLevel', resultCallback, { type, targetId, channelId });
     }
@@ -2349,11 +3523,18 @@ export default class RCIMIWEngine {
      * 注：如要移除消息提醒状态，设置level为RCIMIWPushNotificationLevelDefault
      * @param type     会话类型
      * @param level    消息通知级别
-     * @param callback 事件回调。SDK 从 5.3.1 版本开始支持 callback 方式回调。从 5.4.0 版本废弃该接口的其他回调方式。如果传入了 callback 参数，仅触发 callback 回调。
+     * @param callback 事件回调。SDK 从 5.3.1 版本开始支持 callback 方式回调。从 5.4.0 版本废弃该接口的其他回调方式，预计将在 6.x 版本删除此其他回调方式。如果传入了 callback 参数，仅触发 callback 回调。
      * @return 当次接口操作的状态码。0 代表调用成功 具体结果需要实现接口回调，非 0 代表当前接口调用操作失败，不会触发接口回调，详细错误参考错误码
      * @listener [onConversationTypeNotificationLevelChanged]
      */
-    changeConversationTypeNotificationLevel(type: RCIMIWConversationType, level: RCIMIWPushNotificationLevel, callback: IRCIMIWChangeConversationTypeNotificationLevelCallback): Promise<number> {
+    changeConversationTypeNotificationLevel(
+        type: RCIMIWConversationType,
+        level: RCIMIWPushNotificationLevel,
+        callback: IRCIMIWChangeConversationTypeNotificationLevelCallback
+    ): Promise<number> {
+        if (!validate('type', type, AssertRules.NUMBER, true) || !validate('level', level, AssertRules.NUMBER, true)) {
+            return paramErrorPromise;
+        }
         let resultCallback;
         if (callback) {
             resultCallback = (res: any) => {
@@ -2361,7 +3542,7 @@ export default class RCIMIWEngine {
                     let { code } = res;
                     callback.onConversationTypeNotificationLevelChanged?.({ code });
                 }
-            }
+            };
         }
         return this._invokeMethod('changeConversationTypeNotificationLevel', resultCallback, { type, level });
     }
@@ -2370,9 +3551,12 @@ export default class RCIMIWEngine {
      * 获取会话类型的消息提醒状态
      * @param type 会话类型
      * @return [onConversationTypeNotificationLevelLoaded]
-     * @deprecated 用 {@link #getConversationTypeNotificationLevel(RCIMIWConversationType, IRCIMIWGetConversationTypeNotificationLevelCallback)} 代替
+     * @deprecated 用 {@link #getConversationTypeNotificationLevel(RCIMIWConversationType, IRCIMIWGetConversationTypeNotificationLevelCallback)} 代替， 预计将在 6.x 版本删除此接口。
      */
     loadConversationTypeNotificationLevel(type: RCIMIWConversationType): Promise<number> {
+        if (!validate('type', type, AssertRules.NUMBER, true)) {
+            return paramErrorPromise;
+        }
         let resultCallback;
         return this._invokeMethod('loadConversationTypeNotificationLevel', resultCallback, { type });
     }
@@ -2380,10 +3564,16 @@ export default class RCIMIWEngine {
     /**
      * 获取会话类型的消息提醒状态
      * @param type     会话类型
-     * @param callback 事件回调。SDK 从 5.3.1 版本开始支持 callback 方式回调。从 5.4.0 版本废弃该接口的其他回调方式。如果传入了 callback 参数，仅触发 callback 回调。
+     * @param callback 事件回调。SDK 从 5.3.1 版本开始支持 callback 方式回调。从 5.4.0 版本废弃该接口的其他回调方式，预计将在 6.x 版本删除此其他回调方式。如果传入了 callback 参数，仅触发 callback 回调。
      * @return [onConversationTypeNotificationLevelLoaded]
      */
-    getConversationTypeNotificationLevel(type: RCIMIWConversationType, callback: IRCIMIWGetConversationTypeNotificationLevelCallback): Promise<number> {
+    getConversationTypeNotificationLevel(
+        type: RCIMIWConversationType,
+        callback: IRCIMIWGetConversationTypeNotificationLevelCallback
+    ): Promise<number> {
+        if (!validate('type', type, AssertRules.NUMBER, true)) {
+            return paramErrorPromise;
+        }
         let resultCallback;
         if (callback) {
             resultCallback = (res: any) => {
@@ -2395,7 +3585,7 @@ export default class RCIMIWEngine {
                     let { code } = res;
                     callback.onError?.({ code });
                 }
-            }
+            };
         }
         return this._invokeMethod('getConversationTypeNotificationLevel', resultCallback, { type });
     }
@@ -2405,11 +3595,21 @@ export default class RCIMIWEngine {
      * 一般由管理员设置的接口，针对超级群的所有群成员生效，针对超级群下所有频道生效，优先级较低。如果群成员自己超级群的免打扰级别，那么以群成员自己设置的为准。
      * @param targetId 会话 ID
      * @param level    消息通知级别
-     * @param callback 事件回调。SDK 从 5.3.1 版本开始支持 callback 方式回调。从 5.4.0 版本废弃该接口的其他回调方式。如果传入了 callback 参数，仅触发 callback 回调。
+     * @param callback 事件回调。SDK 从 5.3.1 版本开始支持 callback 方式回调。从 5.4.0 版本废弃该接口的其他回调方式，预计将在 6.x 版本删除此其他回调方式。如果传入了 callback 参数，仅触发 callback 回调。
      * @return 当次接口操作的状态码。0 代表调用成功 具体结果需要实现接口回调，非 0 代表当前接口调用操作失败，不会触发接口回调，详细错误参考错误码
      * @listener [onUltraGroupDefaultNotificationLevelChanged]
      */
-    changeUltraGroupDefaultNotificationLevel(targetId: string, level: RCIMIWPushNotificationLevel, callback: IRCIMIWChangeUltraGroupDefaultNotificationLevelCallback): Promise<number> {
+    changeUltraGroupDefaultNotificationLevel(
+        targetId: string,
+        level: RCIMIWPushNotificationLevel,
+        callback: IRCIMIWChangeUltraGroupDefaultNotificationLevelCallback
+    ): Promise<number> {
+        if (
+            !validate('targetId', targetId, AssertRules.STRING, true) ||
+            !validate('level', level, AssertRules.NUMBER, true)
+        ) {
+            return paramErrorPromise;
+        }
         let resultCallback;
         if (callback) {
             resultCallback = (res: any) => {
@@ -2417,7 +3617,7 @@ export default class RCIMIWEngine {
                     let { code } = res;
                     callback.onUltraGroupDefaultNotificationLevelChanged?.({ code });
                 }
-            }
+            };
         }
         return this._invokeMethod('changeUltraGroupDefaultNotificationLevel', resultCallback, { targetId, level });
     }
@@ -2427,9 +3627,12 @@ export default class RCIMIWEngine {
      * @param targetId 会话 ID
      * @return 当次接口操作的状态码。0 代表调用成功 具体结果需要实现接口回调，非 0 代表当前接口调用操作失败，不会触发接口回调，详细错误参考错误码
      * @listener [onUltraGroupDefaultNotificationLevelLoaded]
-     * @deprecated 用 {@link #getUltraGroupDefaultNotificationLevel(String, IRCIMIWGetUltraGroupDefaultNotificationLevelCallback)} 代替
+     * @deprecated 用 {@link #getUltraGroupDefaultNotificationLevel(String, IRCIMIWGetUltraGroupDefaultNotificationLevelCallback)} 代替， 预计将在 6.x 版本删除此接口。
      */
     loadUltraGroupDefaultNotificationLevel(targetId: string): Promise<number> {
+        if (!validate('targetId', targetId, AssertRules.STRING, true)) {
+            return paramErrorPromise;
+        }
         let resultCallback;
         return this._invokeMethod('loadUltraGroupDefaultNotificationLevel', resultCallback, { targetId });
     }
@@ -2437,11 +3640,17 @@ export default class RCIMIWEngine {
     /**
      * 获取超级群的默认消息状态
      * @param targetId 会话 ID
-     * @param callback 事件回调。SDK 从 5.3.1 版本开始支持 callback 方式回调。从 5.4.0 版本废弃该接口的其他回调方式。如果传入了 callback 参数，仅触发 callback 回调。
+     * @param callback 事件回调。SDK 从 5.3.1 版本开始支持 callback 方式回调。从 5.4.0 版本废弃该接口的其他回调方式，预计将在 6.x 版本删除此其他回调方式。如果传入了 callback 参数，仅触发 callback 回调。
      * @return 当次接口操作的状态码。0 代表调用成功 具体结果需要实现接口回调，非 0 代表当前接口调用操作失败，不会触发接口回调，详细错误参考错误码
      * @listener [onUltraGroupDefaultNotificationLevelLoaded]
      */
-    getUltraGroupDefaultNotificationLevel(targetId: string, callback: IRCIMIWGetUltraGroupDefaultNotificationLevelCallback): Promise<number> {
+    getUltraGroupDefaultNotificationLevel(
+        targetId: string,
+        callback: IRCIMIWGetUltraGroupDefaultNotificationLevelCallback
+    ): Promise<number> {
+        if (!validate('targetId', targetId, AssertRules.STRING, true)) {
+            return paramErrorPromise;
+        }
         let resultCallback;
         if (callback) {
             resultCallback = (res: any) => {
@@ -2453,7 +3662,7 @@ export default class RCIMIWEngine {
                     let { code } = res;
                     callback.onError?.({ code });
                 }
-            }
+            };
         }
         return this._invokeMethod('getUltraGroupDefaultNotificationLevel', resultCallback, { targetId });
     }
@@ -2463,11 +3672,23 @@ export default class RCIMIWEngine {
      * @param targetId  会话 ID
      * @param channelId 频道 ID，仅支持超级群使用。
      * @param level     消息通知级别
-     * @param callback  事件回调。SDK 从 5.3.1 版本开始支持 callback 方式回调。从 5.4.0 版本废弃该接口的其他回调方式。如果传入了 callback 参数，仅触发 callback 回调。
+     * @param callback  事件回调。SDK 从 5.3.1 版本开始支持 callback 方式回调。从 5.4.0 版本废弃该接口的其他回调方式，预计将在 6.x 版本删除此其他回调方式。如果传入了 callback 参数，仅触发 callback 回调。
      * @return 当次接口操作的状态码。0 代表调用成功 具体结果需要实现接口回调，非 0 代表当前接口调用操作失败，不会触发接口回调，详细错误参考错误码
      * @listener [onUltraGroupChannelDefaultNotificationLevelChanged]
      */
-    changeUltraGroupChannelDefaultNotificationLevel(targetId: string, channelId: string, level: RCIMIWPushNotificationLevel, callback: IRCIMIWChangeUltraGroupChannelDefaultNotificationLevelCallback): Promise<number> {
+    changeUltraGroupChannelDefaultNotificationLevel(
+        targetId: string,
+        channelId: string,
+        level: RCIMIWPushNotificationLevel,
+        callback: IRCIMIWChangeUltraGroupChannelDefaultNotificationLevelCallback
+    ): Promise<number> {
+        if (
+            !validate('targetId', targetId, AssertRules.STRING, true) ||
+            !validate('channelId', channelId, AssertRules.ONLY_STRING, false) ||
+            !validate('level', level, AssertRules.NUMBER, true)
+        ) {
+            return paramErrorPromise;
+        }
         let resultCallback;
         if (callback) {
             resultCallback = (res: any) => {
@@ -2475,9 +3696,13 @@ export default class RCIMIWEngine {
                     let { code } = res;
                     callback.onUltraGroupChannelDefaultNotificationLevelChanged?.({ code });
                 }
-            }
+            };
         }
-        return this._invokeMethod('changeUltraGroupChannelDefaultNotificationLevel', resultCallback, { targetId, channelId, level });
+        return this._invokeMethod('changeUltraGroupChannelDefaultNotificationLevel', resultCallback, {
+            targetId,
+            channelId,
+            level,
+        });
     }
 
     /**
@@ -2486,22 +3711,41 @@ export default class RCIMIWEngine {
      * @param channelId 频道 ID，仅支持超级群使用。
      * @return 当次接口操作的状态码。0 代表调用成功 具体结果需要实现接口回调，非 0 代表当前接口调用操作失败，不会触发接口回调，详细错误参考错误码
      * @listener [onUltraGroupChannelDefaultNotificationLevelLoaded]
-     * @deprecated 用 {@link #getUltraGroupChannelDefaultNotificationLevel(String, String, IRCIMIWGetUltraGroupChannelDefaultNotificationLevelCallback)} 代替
+     * @deprecated 用 {@link #getUltraGroupChannelDefaultNotificationLevel(String, String, IRCIMIWGetUltraGroupChannelDefaultNotificationLevelCallback)} 代替， 预计将在 6.x 版本删除此接口。
      */
     loadUltraGroupChannelDefaultNotificationLevel(targetId: string, channelId: string): Promise<number> {
+        if (
+            !validate('targetId', targetId, AssertRules.STRING, true) ||
+            !validate('channelId', channelId, AssertRules.ONLY_STRING, false)
+        ) {
+            return paramErrorPromise;
+        }
         let resultCallback;
-        return this._invokeMethod('loadUltraGroupChannelDefaultNotificationLevel', resultCallback, { targetId, channelId });
+        return this._invokeMethod('loadUltraGroupChannelDefaultNotificationLevel', resultCallback, {
+            targetId,
+            channelId,
+        });
     }
 
     /**
      * 获取超级群频道的默认消息状态
      * @param targetId  会话 ID
      * @param channelId 频道 ID，仅支持超级群使用。
-     * @param callback  事件回调。SDK 从 5.3.1 版本开始支持 callback 方式回调。从 5.4.0 版本废弃该接口的其他回调方式。如果传入了 callback 参数，仅触发 callback 回调。
+     * @param callback  事件回调。SDK 从 5.3.1 版本开始支持 callback 方式回调。从 5.4.0 版本废弃该接口的其他回调方式，预计将在 6.x 版本删除此其他回调方式。如果传入了 callback 参数，仅触发 callback 回调。
      * @return 当次接口操作的状态码。0 代表调用成功 具体结果需要实现接口回调，非 0 代表当前接口调用操作失败，不会触发接口回调，详细错误参考错误码
      * @listener [onUltraGroupChannelDefaultNotificationLevelLoaded]
      */
-    getUltraGroupChannelDefaultNotificationLevel(targetId: string, channelId: string, callback: IRCIMIWGetUltraGroupChannelDefaultNotificationLevelCallback): Promise<number> {
+    getUltraGroupChannelDefaultNotificationLevel(
+        targetId: string,
+        channelId: string,
+        callback: IRCIMIWGetUltraGroupChannelDefaultNotificationLevelCallback
+    ): Promise<number> {
+        if (
+            !validate('targetId', targetId, AssertRules.STRING, true) ||
+            !validate('channelId', channelId, AssertRules.ONLY_STRING, false)
+        ) {
+            return paramErrorPromise;
+        }
         let resultCallback;
         if (callback) {
             resultCallback = (res: any) => {
@@ -2513,19 +3757,28 @@ export default class RCIMIWEngine {
                     let { code } = res;
                     callback.onError?.({ code });
                 }
-            }
+            };
         }
-        return this._invokeMethod('getUltraGroupChannelDefaultNotificationLevel', resultCallback, { targetId, channelId });
+        return this._invokeMethod('getUltraGroupChannelDefaultNotificationLevel', resultCallback, {
+            targetId,
+            channelId,
+        });
     }
 
     /**
      * 设置是否显示远程推送内容详情，此功能需要从服务端开启用户设置功能。
      * @param showContent 是否显示远程推送内容
-     * @param callback    事件回调。SDK 从 5.3.1 版本开始支持 callback 方式回调。从 5.4.0 版本废弃该接口的其他回调方式。如果传入了 callback 参数，仅触发 callback 回调。
+     * @param callback    事件回调。SDK 从 5.3.1 版本开始支持 callback 方式回调。从 5.4.0 版本废弃该接口的其他回调方式，预计将在 6.x 版本删除此其他回调方式。如果传入了 callback 参数，仅触发 callback 回调。
      * @return 当次接口操作的状态码。0 代表调用成功 具体结果需要实现接口回调，非 0 代表当前接口调用操作失败，不会触发接口回调，详细错误参考错误码
      * @listener [onPushContentShowStatusChanged]
      */
-    changePushContentShowStatus(showContent: boolean, callback: IRCIMIWChangePushContentShowStatusCallback): Promise<number> {
+    changePushContentShowStatus(
+        showContent: boolean,
+        callback: IRCIMIWChangePushContentShowStatusCallback
+    ): Promise<number> {
+        if (!validate('showContent', showContent, AssertRules.BOOLEAN, true)) {
+            return paramErrorPromise;
+        }
         let resultCallback;
         if (callback) {
             resultCallback = (res: any) => {
@@ -2533,7 +3786,7 @@ export default class RCIMIWEngine {
                     let { code } = res;
                     callback.onPushContentShowStatusChanged?.({ code });
                 }
-            }
+            };
         }
         return this._invokeMethod('changePushContentShowStatus', resultCallback, { showContent });
     }
@@ -2541,11 +3794,14 @@ export default class RCIMIWEngine {
     /**
      * 设置推送语言
      * @param language 推送语言， 目前仅支持 en_us、zh_cn、ar_sa
-     * @param callback 事件回调。SDK 从 5.3.1 版本开始支持 callback 方式回调。从 5.4.0 版本废弃该接口的其他回调方式。如果传入了 callback 参数，仅触发 callback 回调。
+     * @param callback 事件回调。SDK 从 5.3.1 版本开始支持 callback 方式回调。从 5.4.0 版本废弃该接口的其他回调方式，预计将在 6.x 版本删除此其他回调方式。如果传入了 callback 参数，仅触发 callback 回调。
      * @return 当次接口操作的状态码。0 代表调用成功 具体结果需要实现接口回调，非 0 代表当前接口调用操作失败，不会触发接口回调，详细错误参考错误码
      * @listener [onPushLanguageChanged]
      */
     changePushLanguage(language: string, callback: IRCIMIWChangePushLanguageCallback): Promise<number> {
+        if (!validate('language', language, AssertRules.STRING, true)) {
+            return paramErrorPromise;
+        }
         let resultCallback;
         if (callback) {
             resultCallback = (res: any) => {
@@ -2553,7 +3809,7 @@ export default class RCIMIWEngine {
                     let { code } = res;
                     callback.onPushLanguageChanged?.({ code });
                 }
-            }
+            };
         }
         return this._invokeMethod('changePushLanguage', resultCallback, { language });
     }
@@ -2563,11 +3819,14 @@ export default class RCIMIWEngine {
      * 前提：移动端未在线，Web 、MAC/PC 终端在线，移动端是否接收远程推送。
      * 此功能需要从服务端开启用户设置功能。
      * @param receive  是否接收
-     * @param callback 事件回调。SDK 从 5.3.1 版本开始支持 callback 方式回调。从 5.4.0 版本废弃该接口的其他回调方式。如果传入了 callback 参数，仅触发 callback 回调。
+     * @param callback 事件回调。SDK 从 5.3.1 版本开始支持 callback 方式回调。从 5.4.0 版本废弃该接口的其他回调方式，预计将在 6.x 版本删除此其他回调方式。如果传入了 callback 参数，仅触发 callback 回调。
      * @return 当次接口操作的状态码。0 代表调用成功 具体结果需要实现接口回调，非 0 代表当前接口调用操作失败，不会触发接口回调，详细错误参考错误码
      * @listener [onPushReceiveStatusChanged]
      */
     changePushReceiveStatus(receive: boolean, callback: IRCIMIWChangePushReceiveStatusCallback): Promise<number> {
+        if (!validate('receive', receive, AssertRules.BOOLEAN, true)) {
+            return paramErrorPromise;
+        }
         let resultCallback;
         if (callback) {
             resultCallback = (res: any) => {
@@ -2575,7 +3834,7 @@ export default class RCIMIWEngine {
                     let { code } = res;
                     callback.onPushReceiveStatusChanged?.({ code });
                 }
-            }
+            };
         }
         return this._invokeMethod('changePushReceiveStatus', resultCallback, { receive });
     }
@@ -2584,11 +3843,21 @@ export default class RCIMIWEngine {
      * 给指定的群成员发送消息
      * @param message  要发送的消息
      * @param userIds  群成员集合
-     * @param callback 事件回调。SDK 从 5.3.1 版本开始支持 callback 方式回调。从 5.4.0 版本废弃该接口的其他回调方式。如果传入了 callback 参数，仅触发 callback 回调。
+     * @param callback 事件回调。SDK 从 5.3.1 版本开始支持 callback 方式回调。从 5.4.0 版本废弃该接口的其他回调方式，预计将在 6.x 版本删除此其他回调方式。如果传入了 callback 参数，仅触发 callback 回调。
      * @return 当次接口操作的状态码。0 代表调用成功 具体结果需要实现接口回调，非 0 代表当前接口调用操作失败，不会触发接口回调，详细错误参考错误码
      * @listener [onGroupMessageToDesignatedUsersAttached], [onGroupMessageToDesignatedUsersSent]
      */
-    sendGroupMessageToDesignatedUsers(message: RCIMIWMessage, userIds: Array<string>, callback: RCIMIWSendGroupMessageToDesignatedUsersCallback): Promise<number> {
+    sendGroupMessageToDesignatedUsers(
+        message: RCIMIWMessage,
+        userIds: Array<string>,
+        callback: RCIMIWSendGroupMessageToDesignatedUsersCallback
+    ): Promise<number> {
+        if (
+            !validate('message', message, AssertRules.OBJECT, true) ||
+            !validate('userIds', userIds, AssertRules.ARRAY, true)
+        ) {
+            return paramErrorPromise;
+        }
         let resultCallback;
         if (callback) {
             resultCallback = (res: any) => {
@@ -2600,7 +3869,7 @@ export default class RCIMIWEngine {
                     let { code, message } = res;
                     callback.onMessageSent?.({ code, message });
                 }
-            }
+            };
         }
         return this._invokeMethod('sendGroupMessageToDesignatedUsers', resultCallback, { message, userIds });
     }
@@ -2612,9 +3881,16 @@ export default class RCIMIWEngine {
      * @param channelId 频道 ID，仅支持超级群使用，其他会话类型传 null 即可。
      * @return 当次接口操作的状态码。0 代表调用成功 具体结果需要实现接口回调，非 0 代表当前接口调用操作失败，不会触发接口回调，详细错误参考错误码
      * @listener [onMessageCountLoaded]
-     * @deprecated 用 {@link #getMessageCount(RCIMIWConversationType, String, String, IRCIMIWGetMessageCountCallback)} 代替
+     * @deprecated 用 {@link #getMessageCount(RCIMIWConversationType, String, String, IRCIMIWGetMessageCountCallback)} 代替， 预计将在 6.x 版本删除此接口。
      */
     loadMessageCount(type: RCIMIWConversationType, targetId: string, channelId: string): Promise<number> {
+        if (
+            !validate('type', type, AssertRules.NUMBER, true) ||
+            !validate('targetId', targetId, AssertRules.STRING, true) ||
+            !validate('channelId', channelId, AssertRules.ONLY_STRING, false)
+        ) {
+            return paramErrorPromise;
+        }
         let resultCallback;
         return this._invokeMethod('loadMessageCount', resultCallback, { type, targetId, channelId });
     }
@@ -2624,11 +3900,23 @@ export default class RCIMIWEngine {
      * @param type      会话类型
      * @param targetId  会话 ID
      * @param channelId 频道 ID，仅支持超级群使用，其他会话类型传 null 即可。
-     * @param callback  事件回调。SDK 从 5.3.1 版本开始支持 callback 方式回调。从 5.4.0 版本废弃该接口的其他回调方式。如果传入了 callback 参数，仅触发 callback 回调。
+     * @param callback  事件回调。SDK 从 5.3.1 版本开始支持 callback 方式回调。从 5.4.0 版本废弃该接口的其他回调方式，预计将在 6.x 版本删除此其他回调方式。如果传入了 callback 参数，仅触发 callback 回调。
      * @return 当次接口操作的状态码。0 代表调用成功 具体结果需要实现接口回调，非 0 代表当前接口调用操作失败，不会触发接口回调，详细错误参考错误码
      * @listener [onMessageCountLoaded]
      */
-    getMessageCount(type: RCIMIWConversationType, targetId: string, channelId: string, callback: IRCIMIWGetMessageCountCallback): Promise<number> {
+    getMessageCount(
+        type: RCIMIWConversationType,
+        targetId: string,
+        channelId: string,
+        callback: IRCIMIWGetMessageCountCallback
+    ): Promise<number> {
+        if (
+            !validate('type', type, AssertRules.NUMBER, true) ||
+            !validate('targetId', targetId, AssertRules.STRING, true) ||
+            !validate('channelId', channelId, AssertRules.ONLY_STRING, false)
+        ) {
+            return paramErrorPromise;
+        }
         let resultCallback;
         if (callback) {
             resultCallback = (res: any) => {
@@ -2640,7 +3928,7 @@ export default class RCIMIWEngine {
                     let { code } = res;
                     callback.onError?.({ code });
                 }
-            }
+            };
         }
         return this._invokeMethod('getMessageCount', resultCallback, { type, targetId, channelId });
     }
@@ -2651,9 +3939,15 @@ export default class RCIMIWEngine {
      * @param channelId         频道 ID，仅支持超级群使用，其他会话类型传 null 即可。
      * @return 当次接口操作的状态码。0 代表调用成功 具体结果需要实现接口回调，非 0 代表当前接口调用操作失败，不会触发接口回调，详细错误参考错误码
      * @listener [onTopConversationsLoaded]
-     * @deprecated 用 {@link #getTopConversations(List, String, IRCIMIWGetTopConversationsCallback)} 代替
+     * @deprecated 用 {@link #getTopConversations(List, String, IRCIMIWGetTopConversationsCallback)} 代替， 预计将在 6.x 版本删除此接口。
      */
     loadTopConversations(conversationTypes: Array<RCIMIWConversationType>, channelId: string): Promise<number> {
+        if (
+            !validate('conversationTypes', conversationTypes, AssertRules.NUMBER_ARRAY, true) ||
+            !validate('channelId', channelId, AssertRules.ONLY_STRING, false)
+        ) {
+            return paramErrorPromise;
+        }
         let resultCallback;
         return this._invokeMethod('loadTopConversations', resultCallback, { conversationTypes, channelId });
     }
@@ -2662,11 +3956,21 @@ export default class RCIMIWEngine {
      * 根据会话类型,获取置顶会话列表
      * @param conversationTypes 会话类型集合
      * @param channelId         频道 ID，仅支持超级群使用，其他会话类型传 null 即可。
-     * @param callback          事件回调。SDK 从 5.3.1 版本开始支持 callback 方式回调。从 5.4.0 版本废弃该接口的其他回调方式。如果传入了 callback 参数，仅触发 callback 回调。
+     * @param callback          事件回调。SDK 从 5.3.1 版本开始支持 callback 方式回调。从 5.4.0 版本废弃该接口的其他回调方式，预计将在 6.x 版本删除此其他回调方式。如果传入了 callback 参数，仅触发 callback 回调。
      * @return 当次接口操作的状态码。0 代表调用成功 具体结果需要实现接口回调，非 0 代表当前接口调用操作失败，不会触发接口回调，详细错误参考错误码
      * @listener [onTopConversationsLoaded]
      */
-    getTopConversations(conversationTypes: Array<RCIMIWConversationType>, channelId: string, callback: IRCIMIWGetTopConversationsCallback): Promise<number> {
+    getTopConversations(
+        conversationTypes: Array<RCIMIWConversationType>,
+        channelId: string,
+        callback: IRCIMIWGetTopConversationsCallback
+    ): Promise<number> {
+        if (
+            !validate('conversationTypes', conversationTypes, AssertRules.NUMBER_ARRAY, true) ||
+            !validate('channelId', channelId, AssertRules.ONLY_STRING, false)
+        ) {
+            return paramErrorPromise;
+        }
         let resultCallback;
         if (callback) {
             resultCallback = (res: any) => {
@@ -2678,7 +3982,7 @@ export default class RCIMIWEngine {
                     let { code } = res;
                     callback.onError?.({ code });
                 }
-            }
+            };
         }
         return this._invokeMethod('getTopConversations', resultCallback, { conversationTypes, channelId });
     }
@@ -2688,11 +3992,23 @@ export default class RCIMIWEngine {
      * @param targetId  会话 ID
      * @param channelId 频道 ID，仅支持超级群使用。
      * @param timestamp 已读时间
-     * @param callback  事件回调。SDK 从 5.3.1 版本开始支持 callback 方式回调。从 5.4.0 版本废弃该接口的其他回调方式。如果传入了 callback 参数，仅触发 callback 回调。
+     * @param callback  事件回调。SDK 从 5.3.1 版本开始支持 callback 方式回调。从 5.4.0 版本废弃该接口的其他回调方式，预计将在 6.x 版本删除此其他回调方式。如果传入了 callback 参数，仅触发 callback 回调。
      * @return 当次接口操作的状态码。0 代表调用成功 具体结果需要实现接口回调，非 0 代表当前接口调用操作失败，不会触发接口回调，详细错误参考错误码
      * @listener [onUltraGroupReadStatusSynced]
      */
-    syncUltraGroupReadStatus(targetId: string, channelId: string, timestamp: number, callback: IRCIMIWSyncUltraGroupReadStatusCallback): Promise<number> {
+    syncUltraGroupReadStatus(
+        targetId: string,
+        channelId: string,
+        timestamp: number,
+        callback: IRCIMIWSyncUltraGroupReadStatusCallback
+    ): Promise<number> {
+        if (
+            !validate('targetId', targetId, AssertRules.STRING, true) ||
+            !validate('channelId', channelId, AssertRules.ONLY_STRING, false) ||
+            !validate('timestamp', timestamp, AssertRules.NUMBER, true)
+        ) {
+            return paramErrorPromise;
+        }
         let resultCallback;
         if (callback) {
             resultCallback = (res: any) => {
@@ -2700,7 +4016,7 @@ export default class RCIMIWEngine {
                     let { code } = res;
                     callback.onUltraGroupReadStatusSynced?.({ code });
                 }
-            }
+            };
         }
         return this._invokeMethod('syncUltraGroupReadStatus', resultCallback, { targetId, channelId, timestamp });
     }
@@ -2711,9 +4027,15 @@ export default class RCIMIWEngine {
      * @param targetId 会话 ID
      * @return 当次接口操作的状态码。0 代表调用成功 具体结果需要实现接口回调，非 0 代表当前接口调用操作失败，不会触发接口回调，详细错误参考错误码
      * @listener [onConversationsLoadedForAllChannel]
-     * @deprecated 用 {@link #getConversationsForAllChannel(RCIMIWConversationType, String, IRCIMIWGetConversationsForAllChannelCallback)} 代替
+     * @deprecated 用 {@link #getConversationsForAllChannel(RCIMIWConversationType, String, IRCIMIWGetConversationsForAllChannelCallback)} 代替， 预计将在 6.x 版本删除此接口。
      */
     loadConversationsForAllChannel(type: RCIMIWConversationType, targetId: string): Promise<number> {
+        if (
+            !validate('type', type, AssertRules.NUMBER, true) ||
+            !validate('targetId', targetId, AssertRules.STRING, true)
+        ) {
+            return paramErrorPromise;
+        }
         let resultCallback;
         return this._invokeMethod('loadConversationsForAllChannel', resultCallback, { type, targetId });
     }
@@ -2722,11 +4044,21 @@ export default class RCIMIWEngine {
      * 获取特定会话下所有频道的会话列表，只支持超级群
      * @param type     会话类型
      * @param targetId 会话 ID
-     * @param callback 事件回调。SDK 从 5.3.1 版本开始支持 callback 方式回调。从 5.4.0 版本废弃该接口的其他回调方式。如果传入了 callback 参数，仅触发 callback 回调。
+     * @param callback 事件回调。SDK 从 5.3.1 版本开始支持 callback 方式回调。从 5.4.0 版本废弃该接口的其他回调方式，预计将在 6.x 版本删除此其他回调方式。如果传入了 callback 参数，仅触发 callback 回调。
      * @return 当次接口操作的状态码。0 代表调用成功 具体结果需要实现接口回调，非 0 代表当前接口调用操作失败，不会触发接口回调，详细错误参考错误码
      * @listener [onConversationsLoadedForAllChannel]
      */
-    getConversationsForAllChannel(type: RCIMIWConversationType, targetId: string, callback: IRCIMIWGetConversationsForAllChannelCallback): Promise<number> {
+    getConversationsForAllChannel(
+        type: RCIMIWConversationType,
+        targetId: string,
+        callback: IRCIMIWGetConversationsForAllChannelCallback
+    ): Promise<number> {
+        if (
+            !validate('type', type, AssertRules.NUMBER, true) ||
+            !validate('targetId', targetId, AssertRules.STRING, true)
+        ) {
+            return paramErrorPromise;
+        }
         let resultCallback;
         if (callback) {
             resultCallback = (res: any) => {
@@ -2738,7 +4070,7 @@ export default class RCIMIWEngine {
                     let { code } = res;
                     callback.onError?.({ code });
                 }
-            }
+            };
         }
         return this._invokeMethod('getConversationsForAllChannel', resultCallback, { type, targetId });
     }
@@ -2747,11 +4079,21 @@ export default class RCIMIWEngine {
      * 修改超级群消息
      * @param messageUId 消息的 messageUid，可在消息对象中获取，且只有发送成功的消息才会有值
      * @param message    要修改的 message
-     * @param callback   事件回调。SDK 从 5.3.1 版本开始支持 callback 方式回调。从 5.4.0 版本废弃该接口的其他回调方式。如果传入了 callback 参数，仅触发 callback 回调。
+     * @param callback   事件回调。SDK 从 5.3.1 版本开始支持 callback 方式回调。从 5.4.0 版本废弃该接口的其他回调方式，预计将在 6.x 版本删除此其他回调方式。如果传入了 callback 参数，仅触发 callback 回调。
      * @return 当次接口操作的状态码。0 代表调用成功 具体结果需要实现接口回调，非 0 代表当前接口调用操作失败，不会触发接口回调，详细错误参考错误码
      * @listener [onUltraGroupMessageModified]
      */
-    modifyUltraGroupMessage(messageUId: string, message: RCIMIWMessage, callback: IRCIMIWModifyUltraGroupMessageCallback): Promise<number> {
+    modifyUltraGroupMessage(
+        messageUId: string,
+        message: RCIMIWMessage,
+        callback: IRCIMIWModifyUltraGroupMessageCallback
+    ): Promise<number> {
+        if (
+            !validate('messageUId', messageUId, AssertRules.STRING, true) ||
+            !validate('message', message, AssertRules.OBJECT, true)
+        ) {
+            return paramErrorPromise;
+        }
         let resultCallback;
         if (callback) {
             resultCallback = (res: any) => {
@@ -2759,7 +4101,7 @@ export default class RCIMIWEngine {
                     let { code } = res;
                     callback.onUltraGroupMessageModified?.({ code });
                 }
-            }
+            };
         }
         return this._invokeMethod('modifyUltraGroupMessage', resultCallback, { messageUId, message });
     }
@@ -2768,11 +4110,21 @@ export default class RCIMIWEngine {
      * 撤回超级群消息
      * @param message      需要撤回的消息
      * @param deleteRemote 是否删除远端消息
-     * @param callback     事件回调。SDK 从 5.3.1 版本开始支持 callback 方式回调。从 5.4.0 版本废弃该接口的其他回调方式。如果传入了 callback 参数，仅触发 callback 回调。
+     * @param callback     事件回调。SDK 从 5.3.1 版本开始支持 callback 方式回调。从 5.4.0 版本废弃该接口的其他回调方式，预计将在 6.x 版本删除此其他回调方式。如果传入了 callback 参数，仅触发 callback 回调。
      * @return 当次接口操作的状态码。0 代表调用成功 具体结果需要实现接口回调，非 0 代表当前接口调用操作失败，不会触发接口回调，详细错误参考错误码
      * @listener [onUltraGroupMessageRecalled]
      */
-    recallUltraGroupMessage(message: RCIMIWMessage, deleteRemote: boolean, callback: IRCIMIWRecallUltraGroupMessageCallback): Promise<number> {
+    recallUltraGroupMessage(
+        message: RCIMIWMessage,
+        deleteRemote: boolean,
+        callback: IRCIMIWRecallUltraGroupMessageCallback
+    ): Promise<number> {
+        if (
+            !validate('message', message, AssertRules.OBJECT, true) ||
+            !validate('deleteRemote', deleteRemote, AssertRules.BOOLEAN, true)
+        ) {
+            return paramErrorPromise;
+        }
         let resultCallback;
         if (callback) {
             resultCallback = (res: any) => {
@@ -2780,7 +4132,7 @@ export default class RCIMIWEngine {
                     let { code } = res;
                     callback.onUltraGroupMessageRecalled?.({ code });
                 }
-            }
+            };
         }
         return this._invokeMethod('recallUltraGroupMessage', resultCallback, { message, deleteRemote });
     }
@@ -2791,11 +4143,25 @@ export default class RCIMIWEngine {
      * @param channelId 频道 ID，仅支持超级群使用。
      * @param timestamp 时间戳
      * @param policy    清除策略
-     * @param callback  事件回调。SDK 从 5.3.1 版本开始支持 callback 方式回调。从 5.4.0 版本废弃该接口的其他回调方式。如果传入了 callback 参数，仅触发 callback 回调。
+     * @param callback  事件回调。SDK 从 5.3.1 版本开始支持 callback 方式回调。从 5.4.0 版本废弃该接口的其他回调方式，预计将在 6.x 版本删除此其他回调方式。如果传入了 callback 参数，仅触发 callback 回调。
      * @return 当次接口操作的状态码。0 代表调用成功 具体结果需要实现接口回调，非 0 代表当前接口调用操作失败，不会触发接口回调，详细错误参考错误码
      * @listener [onUltraGroupMessagesCleared]
      */
-    clearUltraGroupMessages(targetId: string, channelId: string, timestamp: number, policy: RCIMIWMessageOperationPolicy, callback: IRCIMIWClearUltraGroupMessagesCallback): Promise<number> {
+    clearUltraGroupMessages(
+        targetId: string,
+        channelId: string,
+        timestamp: number,
+        policy: RCIMIWMessageOperationPolicy,
+        callback: IRCIMIWClearUltraGroupMessagesCallback
+    ): Promise<number> {
+        if (
+            !validate('targetId', targetId, AssertRules.STRING, true) ||
+            !validate('channelId', channelId, AssertRules.ONLY_STRING, false) ||
+            !validate('timestamp', timestamp, AssertRules.NUMBER, true) ||
+            !validate('policy', policy, AssertRules.NUMBER, true)
+        ) {
+            return paramErrorPromise;
+        }
         let resultCallback;
         if (callback) {
             resultCallback = (res: any) => {
@@ -2803,9 +4169,14 @@ export default class RCIMIWEngine {
                     let { code } = res;
                     callback.onUltraGroupMessagesCleared?.({ code });
                 }
-            }
+            };
         }
-        return this._invokeMethod('clearUltraGroupMessages', resultCallback, { targetId, channelId, timestamp, policy });
+        return this._invokeMethod('clearUltraGroupMessages', resultCallback, {
+            targetId,
+            channelId,
+            timestamp,
+            policy,
+        });
     }
 
     /**
@@ -2813,11 +4184,23 @@ export default class RCIMIWEngine {
      * @param targetId     会话 ID
      * @param channelId    频道 ID，仅支持超级群使用。
      * @param typingStatus 输入状态
-     * @param callback     事件回调。SDK 从 5.3.1 版本开始支持 callback 方式回调。从 5.4.0 版本废弃该接口的其他回调方式。如果传入了 callback 参数，仅触发 callback 回调。
+     * @param callback     事件回调。SDK 从 5.3.1 版本开始支持 callback 方式回调。从 5.4.0 版本废弃该接口的其他回调方式，预计将在 6.x 版本删除此其他回调方式。如果传入了 callback 参数，仅触发 callback 回调。
      * @return 当次接口操作的状态码。0 代表调用成功 具体结果需要实现接口回调，非 0 代表当前接口调用操作失败，不会触发接口回调，详细错误参考错误码
      * @listener [onUltraGroupTypingStatusSent]
      */
-    sendUltraGroupTypingStatus(targetId: string, channelId: string, typingStatus: RCIMIWUltraGroupTypingStatus, callback: IRCIMIWSendUltraGroupTypingStatusCallback): Promise<number> {
+    sendUltraGroupTypingStatus(
+        targetId: string,
+        channelId: string,
+        typingStatus: RCIMIWUltraGroupTypingStatus,
+        callback: IRCIMIWSendUltraGroupTypingStatusCallback
+    ): Promise<number> {
+        if (
+            !validate('targetId', targetId, AssertRules.STRING, true) ||
+            !validate('channelId', channelId, AssertRules.ONLY_STRING, false) ||
+            !validate('typingStatus', typingStatus, AssertRules.NUMBER, true)
+        ) {
+            return paramErrorPromise;
+        }
         let resultCallback;
         if (callback) {
             resultCallback = (res: any) => {
@@ -2825,7 +4208,7 @@ export default class RCIMIWEngine {
                     let { code } = res;
                     callback.onUltraGroupTypingStatusSent?.({ code });
                 }
-            }
+            };
         }
         return this._invokeMethod('sendUltraGroupTypingStatus', resultCallback, { targetId, channelId, typingStatus });
     }
@@ -2834,11 +4217,21 @@ export default class RCIMIWEngine {
      * 删除超级群所有频道指定时间之前的消息
      * @param targetId  会话 ID
      * @param timestamp 时间戳
-     * @param callback  事件回调。SDK 从 5.3.1 版本开始支持 callback 方式回调。从 5.4.0 版本废弃该接口的其他回调方式。如果传入了 callback 参数，仅触发 callback 回调。
+     * @param callback  事件回调。SDK 从 5.3.1 版本开始支持 callback 方式回调。从 5.4.0 版本废弃该接口的其他回调方式，预计将在 6.x 版本删除此其他回调方式。如果传入了 callback 参数，仅触发 callback 回调。
      * @return 当次接口操作的状态码。0 代表调用成功 具体结果需要实现接口回调，非 0 代表当前接口调用操作失败，不会触发接口回调，详细错误参考错误码
      * @listener [onUltraGroupMessagesClearedForAllChannel]
      */
-    clearUltraGroupMessagesForAllChannel(targetId: string, timestamp: number, callback: IRCIMIWClearUltraGroupMessagesForAllChannelCallback): Promise<number> {
+    clearUltraGroupMessagesForAllChannel(
+        targetId: string,
+        timestamp: number,
+        callback: IRCIMIWClearUltraGroupMessagesForAllChannelCallback
+    ): Promise<number> {
+        if (
+            !validate('targetId', targetId, AssertRules.STRING, true) ||
+            !validate('timestamp', timestamp, AssertRules.NUMBER, true)
+        ) {
+            return paramErrorPromise;
+        }
         let resultCallback;
         if (callback) {
             resultCallback = (res: any) => {
@@ -2846,7 +4239,7 @@ export default class RCIMIWEngine {
                     let { code } = res;
                     callback.onUltraGroupMessagesClearedForAllChannel?.({ code });
                 }
-            }
+            };
         }
         return this._invokeMethod('clearUltraGroupMessagesForAllChannel', resultCallback, { targetId, timestamp });
     }
@@ -2856,9 +4249,12 @@ export default class RCIMIWEngine {
      * @param messages 获取的消息集合
      * @return 当次接口操作的状态码。0 代表调用成功 具体结果需要实现接口回调，非 0 代表当前接口调用操作失败，不会触发接口回调，详细错误参考错误码
      * @listener [onBatchRemoteUltraGroupMessagesLoaded]
-     * @deprecated 用 {@link #getBatchRemoteUltraGroupMessages(List, IRCIMIWGetBatchRemoteUltraGroupMessagesCallback)} 代替
+     * @deprecated 用 {@link #getBatchRemoteUltraGroupMessages(List, IRCIMIWGetBatchRemoteUltraGroupMessagesCallback)} 代替， 预计将在 6.x 版本删除此接口。
      */
     loadBatchRemoteUltraGroupMessages(messages: Array<RCIMIWMessage>): Promise<number> {
+        if (!validate('messages', messages, AssertRules.ARRAY, true)) {
+            return paramErrorPromise;
+        }
         let resultCallback;
         return this._invokeMethod('loadBatchRemoteUltraGroupMessages', resultCallback, { messages });
     }
@@ -2866,11 +4262,17 @@ export default class RCIMIWEngine {
     /**
      * 从服务获取批量消息
      * @param messages 获取的消息集合
-     * @param callback 事件回调。SDK 从 5.3.1 版本开始支持 callback 方式回调。从 5.4.0 版本废弃该接口的其他回调方式。如果传入了 callback 参数，仅触发 callback 回调。
+     * @param callback 事件回调。SDK 从 5.3.1 版本开始支持 callback 方式回调。从 5.4.0 版本废弃该接口的其他回调方式，预计将在 6.x 版本删除此其他回调方式。如果传入了 callback 参数，仅触发 callback 回调。
      * @return 当次接口操作的状态码。0 代表调用成功 具体结果需要实现接口回调，非 0 代表当前接口调用操作失败，不会触发接口回调，详细错误参考错误码
      * @listener [onBatchRemoteUltraGroupMessagesLoaded]
      */
-    getBatchRemoteUltraGroupMessages(messages: Array<RCIMIWMessage>, callback: IRCIMIWGetBatchRemoteUltraGroupMessagesCallback): Promise<number> {
+    getBatchRemoteUltraGroupMessages(
+        messages: Array<RCIMIWMessage>,
+        callback: IRCIMIWGetBatchRemoteUltraGroupMessagesCallback
+    ): Promise<number> {
+        if (!validate('messages', messages, AssertRules.ARRAY, true)) {
+            return paramErrorPromise;
+        }
         let resultCallback;
         if (callback) {
             resultCallback = (res: any) => {
@@ -2882,7 +4284,7 @@ export default class RCIMIWEngine {
                     let { code } = res;
                     callback.onError?.({ code });
                 }
-            }
+            };
         }
         return this._invokeMethod('getBatchRemoteUltraGroupMessages', resultCallback, { messages });
     }
@@ -2891,11 +4293,18 @@ export default class RCIMIWEngine {
      * 更新超级群消息扩展信息
      * @param messageUId 消息的 messageUid，可在消息对象中获取，且只有发送成功的消息才会有值
      * @param expansion  更新的消息扩展信息键值对，类型是 HashMap；Key 支持大小写英文字母、数字、部分特殊符号 + = - _ 的组合方式，不支持汉字。Value 可以输入空格。
-     * @param callback   事件回调。SDK 从 5.3.1 版本开始支持 callback 方式回调。从 5.4.0 版本废弃该接口的其他回调方式。如果传入了 callback 参数，仅触发 callback 回调。
+     * @param callback   事件回调。SDK 从 5.3.1 版本开始支持 callback 方式回调。从 5.4.0 版本废弃该接口的其他回调方式，预计将在 6.x 版本删除此其他回调方式。如果传入了 callback 参数，仅触发 callback 回调。
      * @return 当次接口操作的状态码。0 代表调用成功 具体结果需要实现接口回调，非 0 代表当前接口调用操作失败，不会触发接口回调，详细错误参考错误码
      * @listener [onUltraGroupMessageExpansionUpdated]
      */
-    updateUltraGroupMessageExpansion(messageUId: string, expansion: { [propName: string]: string }, callback: IRCIMIWUpdateUltraGroupMessageExpansionCallback): Promise<number> {
+    updateUltraGroupMessageExpansion(
+        messageUId: string,
+        expansion: { [propName: string]: string },
+        callback: IRCIMIWUpdateUltraGroupMessageExpansionCallback
+    ): Promise<number> {
+        if (!validate('messageUId', messageUId, AssertRules.STRING, true)) {
+            return paramErrorPromise;
+        }
         let resultCallback;
         if (callback) {
             resultCallback = (res: any) => {
@@ -2903,7 +4312,7 @@ export default class RCIMIWEngine {
                     let { code } = res;
                     callback.onUltraGroupMessageExpansionUpdated?.({ code });
                 }
-            }
+            };
         }
         return this._invokeMethod('updateUltraGroupMessageExpansion', resultCallback, { messageUId, expansion });
     }
@@ -2912,11 +4321,21 @@ export default class RCIMIWEngine {
      * 删除超级群消息扩展信息中特定的键值对
      * @param messageUId 消息的 messageUid，可在消息对象中获取，且只有发送成功的消息才会有值
      * @param keys       消息扩展信息中待删除的 key 的列表，类型是 ArrayList
-     * @param callback   事件回调。SDK 从 5.3.1 版本开始支持 callback 方式回调。从 5.4.0 版本废弃该接口的其他回调方式。如果传入了 callback 参数，仅触发 callback 回调。
+     * @param callback   事件回调。SDK 从 5.3.1 版本开始支持 callback 方式回调。从 5.4.0 版本废弃该接口的其他回调方式，预计将在 6.x 版本删除此其他回调方式。如果传入了 callback 参数，仅触发 callback 回调。
      * @return 当次接口操作的状态码。0 代表调用成功 具体结果需要实现接口回调，非 0 代表当前接口调用操作失败，不会触发接口回调，详细错误参考错误码
      * @listener [onUltraGroupMessageExpansionForKeysRemoved]
      */
-    removeUltraGroupMessageExpansionForKeys(messageUId: string, keys: Array<string>, callback: IRCIMIWRemoveUltraGroupMessageExpansionForKeysCallback): Promise<number> {
+    removeUltraGroupMessageExpansionForKeys(
+        messageUId: string,
+        keys: Array<string>,
+        callback: IRCIMIWRemoveUltraGroupMessageExpansionForKeysCallback
+    ): Promise<number> {
+        if (
+            !validate('messageUId', messageUId, AssertRules.STRING, true) ||
+            !validate('keys', keys, AssertRules.ARRAY, true)
+        ) {
+            return paramErrorPromise;
+        }
         let resultCallback;
         if (callback) {
             resultCallback = (res: any) => {
@@ -2924,7 +4343,7 @@ export default class RCIMIWEngine {
                     let { code } = res;
                     callback.onUltraGroupMessageExpansionForKeysRemoved?.({ code });
                 }
-            }
+            };
         }
         return this._invokeMethod('removeUltraGroupMessageExpansionForKeys', resultCallback, { messageUId, keys });
     }
@@ -2935,6 +4354,9 @@ export default class RCIMIWEngine {
      * @return 当次接口操作的状态码。0 代表调用成功 具体结果需要实现接口回调，非 0 代表当前接口调用操作失败，不会触发接口回调，详细错误参考错误码
      */
     changeLogLevel(level: RCIMIWLogLevel): Promise<number> {
+        if (!validate('level', level, AssertRules.NUMBER, true)) {
+            return paramErrorPromise;
+        }
         let resultCallback;
         return this._invokeMethod('changeLogLevel', resultCallback, { level });
     }
@@ -2973,6 +4395,16 @@ export default class RCIMIWEngine {
     }
 
     /**
+     * 会话状态免打扰多端同步监听
+     */
+    setOnConversationNotificationLevelSyncedListener(
+        callback?: (res: OnConversationNotificationLevelSyncedResult) => void
+    ): void {
+        const eventName = 'IRCIMIWListener:onConversationNotificationLevelSynced';
+        this._setListener(eventName, callback);
+    }
+
+    /**
      * 撤回消息监听器
      */
     setOnRemoteMessageRecalledListener(callback?: (res: OnRemoteMessageRecalledResult) => void): void {
@@ -2999,7 +4431,9 @@ export default class RCIMIWEngine {
     /**
      * 消息扩展信息删除的回调
      */
-    setOnRemoteMessageExpansionForKeyRemovedListener(callback?: (res: OnRemoteMessageExpansionForKeyRemovedResult) => void): void {
+    setOnRemoteMessageExpansionForKeyRemovedListener(
+        callback?: (res: OnRemoteMessageExpansionForKeyRemovedResult) => void
+    ): void {
         const eventName = 'IRCIMIWListener:onRemoteMessageExpansionForKeyRemoved';
         this._setListener(eventName, callback);
     }
@@ -3023,7 +4457,9 @@ export default class RCIMIWEngine {
     /**
      * 同步消息未读状态监听接口。多端登录，收到其它端清除某一会话未读数通知的时候
      */
-    setOnConversationReadStatusSyncMessageReceivedListener(callback?: (res: OnConversationReadStatusSyncMessageReceivedResult) => void): void {
+    setOnConversationReadStatusSyncMessageReceivedListener(
+        callback?: (res: OnConversationReadStatusSyncMessageReceivedResult) => void
+    ): void {
         const eventName = 'IRCIMIWListener:onConversationReadStatusSyncMessageReceived';
         this._setListener(eventName, callback);
     }
@@ -3047,7 +4483,9 @@ export default class RCIMIWEngine {
     /**
      * 超级群消息 kv 被更新
      */
-    setOnRemoteUltraGroupMessageExpansionUpdatedListener(callback?: (res: OnRemoteUltraGroupMessageExpansionUpdatedResult) => void): void {
+    setOnRemoteUltraGroupMessageExpansionUpdatedListener(
+        callback?: (res: OnRemoteUltraGroupMessageExpansionUpdatedResult) => void
+    ): void {
         const eventName = 'IRCIMIWListener:onRemoteUltraGroupMessageExpansionUpdated';
         this._setListener(eventName, callback);
     }
@@ -3055,7 +4493,9 @@ export default class RCIMIWEngine {
     /**
      * 超级群消息被更改
      */
-    setOnRemoteUltraGroupMessageModifiedListener(callback?: (res: OnRemoteUltraGroupMessageModifiedResult) => void): void {
+    setOnRemoteUltraGroupMessageModifiedListener(
+        callback?: (res: OnRemoteUltraGroupMessageModifiedResult) => void
+    ): void {
         const eventName = 'IRCIMIWListener:onRemoteUltraGroupMessageModified';
         this._setListener(eventName, callback);
     }
@@ -3063,7 +4503,9 @@ export default class RCIMIWEngine {
     /**
      * 超级群消息被撤回
      */
-    setOnRemoteUltraGroupMessageRecalledListener(callback?: (res: OnRemoteUltraGroupMessageRecalledResult) => void): void {
+    setOnRemoteUltraGroupMessageRecalledListener(
+        callback?: (res: OnRemoteUltraGroupMessageRecalledResult) => void
+    ): void {
         const eventName = 'IRCIMIWListener:onRemoteUltraGroupMessageRecalled';
         this._setListener(eventName, callback);
     }
@@ -3078,7 +4520,7 @@ export default class RCIMIWEngine {
 
     /**
      * 用户输入状态变化的回调
-          当客户端收到用户输入状态的变化时，会回调此接口，通知发生变化的会话以及当前正在输入的RCUltraGroupTypingStatusInfo列表
+     * 当客户端收到用户输入状态的变化时，会回调此接口，通知发生变化的会话以及当前正在输入的RCUltraGroupTypingStatusInfo列表
      */
     setOnUltraGroupTypingStatusChangedListener(callback?: (res: OnUltraGroupTypingStatusChangedResult) => void): void {
         const eventName = 'IRCIMIWListener:onUltraGroupTypingStatusChanged';
@@ -3104,7 +4546,9 @@ export default class RCIMIWEngine {
     /**
      * 收到群聊已读回执请求的监听
      */
-    setOnGroupMessageReadReceiptRequestReceivedListener(callback?: (res: OnGroupMessageReadReceiptRequestReceivedResult) => void): void {
+    setOnGroupMessageReadReceiptRequestReceivedListener(
+        callback?: (res: OnGroupMessageReadReceiptRequestReceivedResult) => void
+    ): void {
         const eventName = 'IRCIMIWListener:onGroupMessageReadReceiptRequestReceived';
         this._setListener(eventName, callback);
     }
@@ -3112,7 +4556,9 @@ export default class RCIMIWEngine {
     /**
      * 收到群聊已读回执响应的监听
      */
-    setOnGroupMessageReadReceiptResponseReceivedListener(callback?: (res: OnGroupMessageReadReceiptResponseReceivedResult) => void): void {
+    setOnGroupMessageReadReceiptResponseReceivedListener(
+        callback?: (res: OnGroupMessageReadReceiptResponseReceivedResult) => void
+    ): void {
         const eventName = 'IRCIMIWListener:onGroupMessageReadReceiptResponseReceived';
         this._setListener(eventName, callback);
     }
@@ -3184,7 +4630,9 @@ export default class RCIMIWEngine {
     /**
      * [loadUnreadCountByConversationTypes] 的接口监听
      */
-    setOnUnreadCountByConversationTypesLoadedListener(callback?: (res: OnUnreadCountByConversationTypesLoadedResult) => void): void {
+    setOnUnreadCountByConversationTypesLoadedListener(
+        callback?: (res: OnUnreadCountByConversationTypesLoadedResult) => void
+    ): void {
         const eventName = 'IRCIMIWListener:onUnreadCountByConversationTypesLoaded';
         this._setListener(eventName, callback);
     }
@@ -3200,7 +4648,9 @@ export default class RCIMIWEngine {
     /**
      * [loadUltraGroupAllUnreadMentionedCount] 的接口监听
      */
-    setOnUltraGroupAllUnreadCountLoadedListener(callback?: (res: OnUltraGroupAllUnreadCountLoadedResult) => void): void {
+    setOnUltraGroupAllUnreadCountLoadedListener(
+        callback?: (res: OnUltraGroupAllUnreadCountLoadedResult) => void
+    ): void {
         const eventName = 'IRCIMIWListener:onUltraGroupAllUnreadCountLoaded';
         this._setListener(eventName, callback);
     }
@@ -3208,15 +4658,17 @@ export default class RCIMIWEngine {
     /**
      * [loadUltraGroupAllUnreadMentionedCount] 的接口监听
      */
-    setOnUltraGroupAllUnreadMentionedCountLoadedListener(callback?: (res: OnUltraGroupAllUnreadMentionedCountLoadedResult) => void): void {
+    setOnUltraGroupAllUnreadMentionedCountLoadedListener(
+        callback?: (res: OnUltraGroupAllUnreadMentionedCountLoadedResult) => void
+    ): void {
         const eventName = 'IRCIMIWListener:onUltraGroupAllUnreadMentionedCountLoaded';
         this._setListener(eventName, callback);
     }
 
     /**
      *
-          超级群列表同步完成的回调
-
+     * 超级群列表同步完成的回调
+     *
      */
     setOnUltraGroupConversationsSyncedListener(callback?: (res: OnUltraGroupConversationsSyncedResult) => void): void {
         const eventName = 'IRCIMIWListener:onUltraGroupConversationsSynced';
@@ -3354,7 +4806,9 @@ export default class RCIMIWEngine {
     /**
      * [cancelDownloadingMediaMessage] 的接口监听
      */
-    setOnDownloadingMediaMessageCanceledListener(callback?: (res: OnDownloadingMediaMessageCanceledResult) => void): void {
+    setOnDownloadingMediaMessageCanceledListener(
+        callback?: (res: OnDownloadingMediaMessageCanceledResult) => void
+    ): void {
         const eventName = 'IRCIMIWListener:onDownloadingMediaMessageCanceled';
         this._setListener(eventName, callback);
     }
@@ -3450,7 +4904,9 @@ export default class RCIMIWEngine {
     /**
      * [removeMessageExpansionForKeys] 的接口监听
      */
-    setOnMessageExpansionForKeysRemovedListener(callback?: (res: OnMessageExpansionForKeysRemovedResult) => void): void {
+    setOnMessageExpansionForKeysRemovedListener(
+        callback?: (res: OnMessageExpansionForKeysRemovedResult) => void
+    ): void {
         const eventName = 'IRCIMIWListener:onMessageExpansionForKeysRemoved';
         this._setListener(eventName, callback);
     }
@@ -3658,7 +5114,9 @@ export default class RCIMIWEngine {
     /**
      * [changeConversationNotificationLevel] 的接口回调
      */
-    setOnConversationNotificationLevelChangedListener(callback?: (res: OnConversationNotificationLevelChangedResult) => void): void {
+    setOnConversationNotificationLevelChangedListener(
+        callback?: (res: OnConversationNotificationLevelChangedResult) => void
+    ): void {
         const eventName = 'IRCIMIWListener:onConversationNotificationLevelChanged';
         this._setListener(eventName, callback);
     }
@@ -3666,7 +5124,9 @@ export default class RCIMIWEngine {
     /**
      * [loadConversationNotificationLevel] 的接口回调
      */
-    setOnConversationNotificationLevelLoadedListener(callback?: (res: OnConversationNotificationLevelLoadedResult) => void): void {
+    setOnConversationNotificationLevelLoadedListener(
+        callback?: (res: OnConversationNotificationLevelLoadedResult) => void
+    ): void {
         const eventName = 'IRCIMIWListener:onConversationNotificationLevelLoaded';
         this._setListener(eventName, callback);
     }
@@ -3674,7 +5134,9 @@ export default class RCIMIWEngine {
     /**
      * [changeConversationTypeNotificationLevel] 的接口回调
      */
-    setOnConversationTypeNotificationLevelChangedListener(callback?: (res: OnConversationTypeNotificationLevelChangedResult) => void): void {
+    setOnConversationTypeNotificationLevelChangedListener(
+        callback?: (res: OnConversationTypeNotificationLevelChangedResult) => void
+    ): void {
         const eventName = 'IRCIMIWListener:onConversationTypeNotificationLevelChanged';
         this._setListener(eventName, callback);
     }
@@ -3682,7 +5144,9 @@ export default class RCIMIWEngine {
     /**
      * [loadConversationTypeNotificationLevel] 的接口回调
      */
-    setOnConversationTypeNotificationLevelLoadedListener(callback?: (res: OnConversationTypeNotificationLevelLoadedResult) => void): void {
+    setOnConversationTypeNotificationLevelLoadedListener(
+        callback?: (res: OnConversationTypeNotificationLevelLoadedResult) => void
+    ): void {
         const eventName = 'IRCIMIWListener:onConversationTypeNotificationLevelLoaded';
         this._setListener(eventName, callback);
     }
@@ -3690,7 +5154,9 @@ export default class RCIMIWEngine {
     /**
      * [changeUltraGroupDefaultNotificationLevel] 的接口回调
      */
-    setOnUltraGroupDefaultNotificationLevelChangedListener(callback?: (res: OnUltraGroupDefaultNotificationLevelChangedResult) => void): void {
+    setOnUltraGroupDefaultNotificationLevelChangedListener(
+        callback?: (res: OnUltraGroupDefaultNotificationLevelChangedResult) => void
+    ): void {
         const eventName = 'IRCIMIWListener:onUltraGroupDefaultNotificationLevelChanged';
         this._setListener(eventName, callback);
     }
@@ -3698,7 +5164,9 @@ export default class RCIMIWEngine {
     /**
      * [loadUltraGroupDefaultNotificationLevel] 的接口回调
      */
-    setOnUltraGroupDefaultNotificationLevelLoadedListener(callback?: (res: OnUltraGroupDefaultNotificationLevelLoadedResult) => void): void {
+    setOnUltraGroupDefaultNotificationLevelLoadedListener(
+        callback?: (res: OnUltraGroupDefaultNotificationLevelLoadedResult) => void
+    ): void {
         const eventName = 'IRCIMIWListener:onUltraGroupDefaultNotificationLevelLoaded';
         this._setListener(eventName, callback);
     }
@@ -3706,7 +5174,9 @@ export default class RCIMIWEngine {
     /**
      * [changeUltraGroupChannelDefaultNotificationLevel] 的接口回调
      */
-    setOnUltraGroupChannelDefaultNotificationLevelChangedListener(callback?: (res: OnUltraGroupChannelDefaultNotificationLevelChangedResult) => void): void {
+    setOnUltraGroupChannelDefaultNotificationLevelChangedListener(
+        callback?: (res: OnUltraGroupChannelDefaultNotificationLevelChangedResult) => void
+    ): void {
         const eventName = 'IRCIMIWListener:onUltraGroupChannelDefaultNotificationLevelChanged';
         this._setListener(eventName, callback);
     }
@@ -3714,7 +5184,9 @@ export default class RCIMIWEngine {
     /**
      * [loadUltraGroupChannelDefaultNotificationLevel] 的接口回调
      */
-    setOnUltraGroupChannelDefaultNotificationLevelLoadedListener(callback?: (res: OnUltraGroupChannelDefaultNotificationLevelLoadedResult) => void): void {
+    setOnUltraGroupChannelDefaultNotificationLevelLoadedListener(
+        callback?: (res: OnUltraGroupChannelDefaultNotificationLevelLoadedResult) => void
+    ): void {
         const eventName = 'IRCIMIWListener:onUltraGroupChannelDefaultNotificationLevelLoaded';
         this._setListener(eventName, callback);
     }
@@ -3761,18 +5233,22 @@ export default class RCIMIWEngine {
 
     /**
      * [sendGroupMessageToDesignatedUsers] 的接口回调
-          消息存入数据库的回调
+     * 消息存入数据库的回调
      */
-    setOnGroupMessageToDesignatedUsersAttachedListener(callback?: (res: OnGroupMessageToDesignatedUsersAttachedResult) => void): void {
+    setOnGroupMessageToDesignatedUsersAttachedListener(
+        callback?: (res: OnGroupMessageToDesignatedUsersAttachedResult) => void
+    ): void {
         const eventName = 'IRCIMIWListener:onGroupMessageToDesignatedUsersAttached';
         this._setListener(eventName, callback);
     }
 
     /**
      * [sendGroupMessageToDesignatedUsers] 的接口回调
-          消息发送完成的回调
+     * 消息发送完成的回调
      */
-    setOnGroupMessageToDesignatedUsersSentListener(callback?: (res: OnGroupMessageToDesignatedUsersSentResult) => void): void {
+    setOnGroupMessageToDesignatedUsersSentListener(
+        callback?: (res: OnGroupMessageToDesignatedUsersSentResult) => void
+    ): void {
         const eventName = 'IRCIMIWListener:onGroupMessageToDesignatedUsersSent';
         this._setListener(eventName, callback);
     }
@@ -3788,7 +5264,9 @@ export default class RCIMIWEngine {
     /**
      * [loadConversationsForAllChannel] 的接口监听
      */
-    setOnConversationsLoadedForAllChannelListener(callback?: (res: OnConversationsLoadedForAllChannelResult) => void): void {
+    setOnConversationsLoadedForAllChannelListener(
+        callback?: (res: OnConversationsLoadedForAllChannelResult) => void
+    ): void {
         const eventName = 'IRCIMIWListener:onConversationsLoadedForAllChannel';
         this._setListener(eventName, callback);
     }
@@ -3796,7 +5274,9 @@ export default class RCIMIWEngine {
     /**
      * [loadUltraGroupUnreadMentionedCount] 的接口监听
      */
-    setOnUltraGroupUnreadMentionedCountLoadedListener(callback?: (res: OnUltraGroupUnreadMentionedCountLoadedResult) => void): void {
+    setOnUltraGroupUnreadMentionedCountLoadedListener(
+        callback?: (res: OnUltraGroupUnreadMentionedCountLoadedResult) => void
+    ): void {
         const eventName = 'IRCIMIWListener:onUltraGroupUnreadMentionedCountLoaded';
         this._setListener(eventName, callback);
     }
@@ -3833,7 +5313,9 @@ export default class RCIMIWEngine {
     /**
      * [clearUltraGroupMessagesForAllChannel] 的接口监听
      */
-    setOnUltraGroupMessagesClearedForAllChannelListener(callback?: (res: OnUltraGroupMessagesClearedForAllChannelResult) => void): void {
+    setOnUltraGroupMessagesClearedForAllChannelListener(
+        callback?: (res: OnUltraGroupMessagesClearedForAllChannelResult) => void
+    ): void {
         const eventName = 'IRCIMIWListener:onUltraGroupMessagesClearedForAllChannel';
         this._setListener(eventName, callback);
     }
@@ -3849,7 +5331,9 @@ export default class RCIMIWEngine {
     /**
      * [loadBatchRemoteUltraGroupMessages] 的接口监听
      */
-    setOnBatchRemoteUltraGroupMessagesLoadedListener(callback?: (res: OnBatchRemoteUltraGroupMessagesLoadedResult) => void): void {
+    setOnBatchRemoteUltraGroupMessagesLoadedListener(
+        callback?: (res: OnBatchRemoteUltraGroupMessagesLoadedResult) => void
+    ): void {
         const eventName = 'IRCIMIWListener:onBatchRemoteUltraGroupMessagesLoaded';
         this._setListener(eventName, callback);
     }
@@ -3857,7 +5341,9 @@ export default class RCIMIWEngine {
     /**
      * [updateUltraGroupMessageExpansion] 的接口监听
      */
-    setOnUltraGroupMessageExpansionUpdatedListener(callback?: (res: OnUltraGroupMessageExpansionUpdatedResult) => void): void {
+    setOnUltraGroupMessageExpansionUpdatedListener(
+        callback?: (res: OnUltraGroupMessageExpansionUpdatedResult) => void
+    ): void {
         const eventName = 'IRCIMIWListener:onUltraGroupMessageExpansionUpdated';
         this._setListener(eventName, callback);
     }
@@ -3865,7 +5351,9 @@ export default class RCIMIWEngine {
     /**
      * [removeUltraGroupMessageExpansionForKeys] 的接口监听
      */
-    setOnUltraGroupMessageExpansionForKeysRemovedListener(callback?: (res: OnUltraGroupMessageExpansionForKeysRemovedResult) => void): void {
+    setOnUltraGroupMessageExpansionForKeysRemovedListener(
+        callback?: (res: OnUltraGroupMessageExpansionForKeysRemovedResult) => void
+    ): void {
         const eventName = 'IRCIMIWListener:onUltraGroupMessageExpansionForKeysRemoved';
         this._setListener(eventName, callback);
     }

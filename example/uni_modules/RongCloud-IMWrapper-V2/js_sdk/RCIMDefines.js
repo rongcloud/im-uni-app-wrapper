@@ -1,3 +1,50 @@
+export var RCIMIWPushType;
+(function (RCIMIWPushType) {
+    /**
+     * iOS
+     */
+    RCIMIWPushType[RCIMIWPushType["iOS"] = 0] = "iOS";
+    /**
+     * 未知类型
+     */
+    RCIMIWPushType[RCIMIWPushType["unknown"] = 1] = "unknown";
+    /**
+     * 融云自己的，不再使用
+     */
+    RCIMIWPushType[RCIMIWPushType["rong"] = 2] = "rong";
+    /**
+     * 华为推送
+     */
+    RCIMIWPushType[RCIMIWPushType["huawei"] = 3] = "huawei";
+    /**
+     * 小米推送
+     */
+    RCIMIWPushType[RCIMIWPushType["xiaomi"] = 4] = "xiaomi";
+    /**
+     * FCM 推送
+     */
+    RCIMIWPushType[RCIMIWPushType["googleFCM"] = 5] = "googleFCM";
+    /**
+     * GCM 推送
+     */
+    RCIMIWPushType[RCIMIWPushType["googleGCM"] = 6] = "googleGCM";
+    /**
+     * 魅族推送
+     */
+    RCIMIWPushType[RCIMIWPushType["meizu"] = 7] = "meizu";
+    /**
+     * VIVO 推送
+     */
+    RCIMIWPushType[RCIMIWPushType["vivo"] = 8] = "vivo";
+    /**
+     * OPPO 推送
+     */
+    RCIMIWPushType[RCIMIWPushType["oppo"] = 9] = "oppo";
+    /**
+     * 华为荣耀推送
+     */
+    RCIMIWPushType[RCIMIWPushType["honor"] = 10] = "honor";
+})(RCIMIWPushType || (RCIMIWPushType = {}));
 export var RCIMIWImportanceHW;
 (function (RCIMIWImportanceHW) {
     /**
@@ -24,6 +71,26 @@ export var RCIMIWMessageOperationPolicy;
      */
     RCIMIWMessageOperationPolicy[RCIMIWMessageOperationPolicy["localRemote"] = 2] = "localRemote";
 })(RCIMIWMessageOperationPolicy || (RCIMIWMessageOperationPolicy = {}));
+export var RCIMIWNativeCustomMessagePersistentFlag;
+(function (RCIMIWNativeCustomMessagePersistentFlag) {
+    /**
+     * 不存储，不计数
+     */
+    RCIMIWNativeCustomMessagePersistentFlag[RCIMIWNativeCustomMessagePersistentFlag["none"] = 0] = "none";
+    /**
+     * 在本地只存储，但不计入未读数
+     */
+    RCIMIWNativeCustomMessagePersistentFlag[RCIMIWNativeCustomMessagePersistentFlag["persisted"] = 1] = "persisted";
+    /**
+     * 在本地进行存储并计入未读数
+     */
+    RCIMIWNativeCustomMessagePersistentFlag[RCIMIWNativeCustomMessagePersistentFlag["counted"] = 2] = "counted";
+    /**
+ * 在本地不存储，不计入未读数，并且如果对方不在线，服务器会直接丢弃该消息，对方如果之后再上线也不会再收到此消息。
+    一般用于发送输入状态之类的消息。
+ */
+    RCIMIWNativeCustomMessagePersistentFlag[RCIMIWNativeCustomMessagePersistentFlag["status"] = 3] = "status";
+})(RCIMIWNativeCustomMessagePersistentFlag || (RCIMIWNativeCustomMessagePersistentFlag = {}));
 export var RCIMIWVIVOPushType;
 (function (RCIMIWVIVOPushType) {
     /**
@@ -219,6 +286,14 @@ export var RCIMIWMessageType;
      * 用户自定义消息
      */
     RCIMIWMessageType[RCIMIWMessageType["userCustom"] = 13] = "userCustom";
+    /**
+     * 原生自定义普通消息
+     */
+    RCIMIWMessageType[RCIMIWMessageType["nativeCustom"] = 14] = "nativeCustom";
+    /**
+     * 原生自定义媒体消息
+     */
+    RCIMIWMessageType[RCIMIWMessageType["nativeCustomMedia"] = 15] = "nativeCustomMedia";
 })(RCIMIWMessageType || (RCIMIWMessageType = {}));
 export var RCIMIWMessageBlockType;
 (function (RCIMIWMessageBlockType) {
@@ -337,6 +412,29 @@ export var RCIMIWMentionedType;
      */
     RCIMIWMentionedType[RCIMIWMentionedType["part"] = 1] = "part";
 })(RCIMIWMentionedType || (RCIMIWMentionedType = {}));
+export var RCIMIWAreaCode;
+(function (RCIMIWAreaCode) {
+    /**
+     * 北京数据中心，默认值
+     */
+    RCIMIWAreaCode[RCIMIWAreaCode["bj"] = 0] = "bj";
+    /**
+     * 新加坡数据中心
+     */
+    RCIMIWAreaCode[RCIMIWAreaCode["sg"] = 1] = "sg";
+    /**
+     * 北美数据中心
+     */
+    RCIMIWAreaCode[RCIMIWAreaCode["na"] = 2] = "na";
+    /**
+     * 新加坡 B 企业合作数据中心
+     */
+    RCIMIWAreaCode[RCIMIWAreaCode["sgB"] = 3] = "sgB";
+    /**
+     * 沙特数据中心
+     */
+    RCIMIWAreaCode[RCIMIWAreaCode["sa"] = 4] = "sa";
+})(RCIMIWAreaCode || (RCIMIWAreaCode = {}));
 export var RCIMIWChatRoomEntriesOperationType;
 (function (RCIMIWChatRoomEntriesOperationType) {
     /**
@@ -390,6 +488,17 @@ export var RCIMIWBlacklistStatus;
      */
     RCIMIWBlacklistStatus[RCIMIWBlacklistStatus["notInBlacklist"] = 2] = "notInBlacklist";
 })(RCIMIWBlacklistStatus || (RCIMIWBlacklistStatus = {}));
+export var RCIMIWImportanceHonor;
+(function (RCIMIWImportanceHonor) {
+    /**
+     * 表示消息为服务与通讯类。消息提醒方式为锁屏+铃声+震动。
+     */
+    RCIMIWImportanceHonor[RCIMIWImportanceHonor["normal"] = 0] = "normal";
+    /**
+     * 表示消息为资讯营销类。消息提醒方式为静默通知，仅在下拉通知栏展示。
+     */
+    RCIMIWImportanceHonor[RCIMIWImportanceHonor["low"] = 1] = "low";
+})(RCIMIWImportanceHonor || (RCIMIWImportanceHonor = {}));
 export var RCIMIWConnectionStatus;
 (function (RCIMIWConnectionStatus) {
     /**
