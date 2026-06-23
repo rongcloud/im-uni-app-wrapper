@@ -1,5 +1,7 @@
 # 融云即时通讯 uni-app Demo
 
+本项目为融云即时通讯能力库（IMLib）的 uni-app 示例 Demo，基于融云 uni-app IMLib RCUniIMV2 原生插件，旨在帮助开发者快速集成并全面掌握融云 IM 的核心功能。
+
 ## 项目简介
 本项目提供融云即时通讯能力库（IMLib）的 uni-app 示例，帮助开发者快速集成和了解融云 IM 所支持的功能。
 
